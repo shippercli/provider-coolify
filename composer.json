@@ -1,0 +1,25 @@
+{
+  "name": "shippercli/provider-coolify",
+  "description": "Coolify deployment provider plugin for Shipper CLI",
+  "type": "shipper-plugin",
+  "license": "MIT",
+  "require": {
+    "php": "^8.3",
+    "ext-curl": "*",
+    "shippercli/contracts": "^1.2"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "ShipperCli\\ProviderCoolify\\": "src/"
+    }
+  },
+  "scripts": {
+    "test": "phpunit"
+  },
+  "extra": {
+    "shipper-plugin": "ShipperCli\\ProviderCoolify\\CoolifyPlugin"
+  }
+}

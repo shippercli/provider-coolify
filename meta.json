@@ -1,0 +1,29 @@
+{
+  "name": "Coolify",
+  "slug": "coolify",
+  "logo": "logo.svg",
+  "darkLogo": "logo.svg",
+  "status": "beta",
+  "statusNote": "Initial provider implementation. Test against the target Coolify version and API permissions before production use.",
+  "description": "Deploy Shipper applications and multi-service stacks to self-hosted or cloud Coolify instances.",
+  "features": [
+    "Git, Docker Image, and Dockerfile Deployment",
+    "Docker Compose Services",
+    "Environment Variables and Storage",
+    "Database Resources",
+    "Domains and HTTPS",
+    "Queue Workers and Daemons",
+    "Scheduled Tasks",
+    "Deployment Logs and Status",
+    "Image Rollback",
+    "Coolify Server and Cloud Provisioning"
+  ],
+  "config": {
+    "provider": "coolify",
+    "url": "https://coolify.example.com",
+    "api_token": "\${COOLIFY_API_TOKEN}",
+    "server_uuid": "\${COOLIFY_SERVER_UUID}",
+    "project_uuid": "\${COOLIFY_PROJECT_UUID}"
+  },
+  "install": "Install from GitHub VCS using dev-main; see README for commands"
+}
