@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Shipper\Provider\Coolify;
+namespace ShipperCli\ProviderCoolify;
 
 /** Git provider source operations exposed by Coolify's REST API. */
 trait CoolifySourceOperations

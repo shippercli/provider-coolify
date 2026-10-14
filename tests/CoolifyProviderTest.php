@@ -24,7 +24,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $profile = new class {
             public function name(): string { return 'production'; }
@@ -60,13 +60,13 @@ final class CoolifyProviderTest extends TestCase
                     'fqdn' => 'https://42.preview.example.test',
                     'status' => 'running',
                 ]]]]],
-                default => throw new \\LogicException('Unexpected Coolify MCP request.'),
+                default => throw new \LogicException('Unexpected Coolify MCP request.'),
             };
 
             return [
                 'status' => 200,
                 'headers' => [],
-                'body' => \\json_encode(['jsonrpc' => '2.0', 'id' => $message['id'], 'result' => $result], JSON_THROW_ON_ERROR),
+                'body' => \json_encode(['jsonrpc' => '2.0', 'id' => $message['id'], 'result' => $result], JSON_THROW_ON_ERROR),
             ];
         });
 
@@ -83,7 +83,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $profile = new class {
             public function name(): string { return 'production'; }
@@ -143,7 +143,7 @@ final class CoolifyProviderTest extends TestCase
             }; }
             public function config(): array { return ['coolify' => ['url' => 'https://coolify.example.test', 'api_token' => 'api-token']]; }
         };
-        $provider = new CoolifyProvider;
+        $provider = new CoolifyProvider(['url' => 'https://coolify.example.test', 'api_token' => 'api-token']);
 
         $invalid = $provider->validate($project, $profile(['cloud_provider' => 'aws', 'name' => 'production']));
         self::assertContains("Coolify server provisioning does not support cloud_provider 'aws'.", $invalid);
@@ -268,7 +268,7 @@ final class CoolifyProviderTest extends TestCase
                         'tags' => [$tag, 'shippercli-managed'],
                     ]];
                 }
-                if ($path === '/applications/worker-pr-42/logs?lines=100') {
+                if ($path === '/applications/worker-pr-42/logs?lines=100&show_timestamps=0') {
                     return ['logs' => "worker ready\n"];
                 }
 
@@ -280,7 +280,7 @@ final class CoolifyProviderTest extends TestCase
         self::assertSame(['worker ready'], $provider->logs($project, $profile));
         self::assertSame([
             ['GET', '/applications?tag='.rawurlencode($tag), null],
-            ['GET', '/applications/worker-pr-42/logs?lines=100', null],
+            ['GET', '/applications/worker-pr-42/logs?lines=100&show_timestamps=0', null],
         ], $calls);
     }
 
@@ -425,7 +425,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -497,7 +497,7 @@ final class CoolifyProviderTest extends TestCase
         $ensureWorkerReplicas = new \ReflectionMethod($provider, 'ensureWorkerReplicas');
         $desiredWorkerNames = [];
 
-        $ensureWorkerReplicas->invoke($provider, $client, $project, $profile, 'project-1', 'environment-1', 'production', 'server-1', 'queue-default', 'php artisan queue:work', 1, $desiredWorkerNames);
+        $ensureWorkerReplicas->invokeArgs($provider, [$client, $project, $profile, 'project-1', 'environment-1', 'production', 'server-1', 'queue-default', 'php artisan queue:work', 1, &$desiredWorkerNames]);
 
         self::assertContains(['PATCH', '/applications/worker-app', [
             'max_restart_count' => 5,
@@ -512,7 +512,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -567,7 +567,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -616,7 +616,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
             public function deployScript(): string { return 'php artisan migrate --force'; }
         };
@@ -670,7 +670,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
             public function redirects(): array
             {
@@ -836,7 +836,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -864,8 +864,7 @@ final class CoolifyProviderTest extends TestCase
         $ensureWorkerReplicas = new \ReflectionMethod($provider, 'ensureWorkerReplicas');
         $desiredWorkerNames = [];
 
-        $ensureWorkerReplicas->invoke(
-            $provider,
+        $ensureWorkerReplicas->invokeArgs($provider, [
             $client,
             $project,
             $profile,
@@ -876,11 +875,11 @@ final class CoolifyProviderTest extends TestCase
             'daemon-worker',
             'php artisan schedule:work',
             1,
-            $desiredWorkerNames,
+            &$desiredWorkerNames,
             [],
             true,
             ['custom_docker_run_options' => "--user '1000:1000'"],
-        );
+        ]);
 
         self::assertContains(
             ['PATCH', '/applications/worker-1', ['custom_docker_run_options' => "--init --user '1000:1000'"]],
@@ -899,7 +898,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function queues(): array
             {
                 return ['default' => new class {
@@ -929,7 +928,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -1345,7 +1344,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $profile = new class {
             public function name(): string { return 'production'; }
@@ -1540,7 +1539,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $provider = new CoolifyProvider([
             'url' => 'https://coolify.example.test',
@@ -1575,7 +1574,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $profile = new class {
             public function name(): string { return 'production'; }
@@ -1603,7 +1602,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function queues(): array { return [new \stdClass]; }
         };
         $profile = new class {
@@ -2025,7 +2024,7 @@ final class CoolifyProviderTest extends TestCase
         $profile = new class {
             public function name(): string { return 'production'; }
         };
-        $prefix = 'shipper-'.substr(hash('sha256', 'storefront|production'), 0, 16).'-';
+        $prefix = 'shipper-'.substr(hash('sha256', 'storefront|production'), 0, 10).'-';
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
             'api-token',
@@ -2645,7 +2644,7 @@ final class CoolifyProviderTest extends TestCase
         $created = $provider->createServer(['name' => 'stage', 'ip' => '192.0.2.11']);
 
         self::assertFalse($provider->deleteServer('sv-456', $created['ownership_token']));
-        self::assertStringContainsString('still hosts managed resources', $provider->getLastError());
+        self::assertStringContainsString('still hosts resources', $provider->getLastError());
         self::assertNotContains(['DELETE', '/servers/sv-456', null], $calls);
     }
 }

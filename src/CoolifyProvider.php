@@ -75,6 +75,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     public function validate(object $project, object $profile): array
     {
         $errors = [];
+        $profileOptions = $this->profileOptions($profile);
         if (\array_key_exists('mcp_enabled', $this->config) && ! \is_bool($this->config['mcp_enabled'])) {
             $errors[] = 'Coolify mcp_enabled must be a boolean.';
         }
@@ -216,6 +217,10 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         if (! \in_array($this->sourceType($profile), ['git', 'docker_image', 'dockerfile'], true)) {
             $errors[] = 'Coolify source_type must be git, docker_image, or dockerfile.';
         }
+        $hasEnabledWorkloads = \array_filter(
+            [...(\method_exists($project, 'queues') ? $project->queues() : []), ...(\method_exists($project, 'daemons') ? $project->daemons() : [])],
+            static fn (mixed $workload): bool => ! \method_exists($workload, 'enabled') || $workload->enabled(),
+        ) !== [];
         if (\in_array($this->sourceType($profile), ['docker_image', 'dockerfile'], true)) {
             foreach (['install_command', 'build_command', 'dockerfile_location', 'docker_compose_location'] as $option) {
                 if ($this->profileOption($profile, $option, $this->stringConfig($option)) !== '') {
@@ -365,10 +370,6 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $errors[] = 'Coolify SSL type must be letsencrypt, auto, wildcard, or custom. Wildcard and custom certificates must already be configured on the Coolify proxy.';
             }
         }
-        $hasEnabledWorkloads = \array_filter(
-            [...(\method_exists($project, 'queues') ? $project->queues() : []), ...(\method_exists($project, 'daemons') ? $project->daemons() : [])],
-            static fn (mixed $workload): bool => ! \method_exists($workload, 'enabled') || $workload->enabled(),
-        ) !== [];
         if ($hasEnabledWorkloads && \in_array($buildPack, ['static', 'dockercompose'], true)) {
             $errors[] = "Coolify build_pack '{$buildPack}' cannot run Shipper queue workers or daemons as separate applications; use a Nixpacks, Railpack, or Dockerfile application build with a runnable start command.";
         }
@@ -3699,6 +3700,11 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @param array<string, mixed> $settings @return array<string, mixed> */
     public function configureApplicationSecretManager(string $applicationUuid, string $integrationTokenUuid, array $settings = []): array
     {
+        $this->assertResourceIdentifier($applicationUuid, 'application');
+        if ($settings !== [] && (\array_is_list($settings)
+            || \array_filter(\array_keys($settings), static fn (mixed $key): bool => ! \is_string($key)) !== [])) {
+            throw new \InvalidArgumentException('Coolify secret manager settings must be an object-like map.');
+        }
         if (\trim($integrationTokenUuid) === '') {
             throw new \InvalidArgumentException('Coolify secret-manager configuration requires an integration token UUID.');
         }
@@ -5136,7 +5142,9 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             ($serviceSettings['migrate_volumes'] ?? true) === true,
         );
         if ($environmentUuid !== '' && ($service['environment_uuid'] ?? null) !== $environmentUuid) {
-            $this->moveService($uuid, $environmentUuid);
+            $client->request('POST', '/services/'.\rawurlencode($uuid).'/move', [
+                'environment_uuid' => $environmentUuid,
+            ]);
         }
         $this->applyServiceStorageFeatures($client, $uuid, $profile, \is_array($serviceSettings) ? $serviceSettings : []);
         $this->applyServiceComponentOptions($client, $uuid, \is_array($serviceSettings) ? $serviceSettings : []);
@@ -6580,6 +6588,14 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             return '';
         }
         $repository = $project->repository();
+        if (\is_object($repository)) {
+            $url = \method_exists($repository, 'url') ? $repository->url() : '';
+
+            return \is_string($url) ? \trim($url) : '';
+        }
+        if (! \is_array($repository)) {
+            return '';
+        }
         $url = $repository['url'] ?? $repository['git_repository'] ?? '';
         if (\is_string($url) && \trim($url) !== '') {
             return \trim($url);
