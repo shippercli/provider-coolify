@@ -19,6 +19,13 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 calls.append((self.command, self.path, self.headers.get('Authorization'), body))
                 payload = b'[]' if self.command == 'GET' else b'{}'
+                if self.command == 'POST' and self.path == '/api/v1/databases/postgresql':
+                    payload = b'{"uuid":"literal-created"}'
+                elif self.command == 'GET' and self.path == '/api/v1/databases/literal-created':
+                    payload = json.dumps({'uuid': 'literal-created', 'internal_db_host': 'db.internal',
+                        'postgres_db': 'main', 'postgres_user': 'user',
+                        'postgres_password': 'literal-${PROJECT_NAME}-${PROFILE}-+%:@',
+                        'server_uuid': 'server', 'environment_uuid': 'environment'}).encode()
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(payload)))
                 self.end_headers()
@@ -33,7 +40,8 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-nosql-environment.php')),
                     f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(len(calls), 54)
+                self.assertEqual(len(calls), 58)
+                self.assertEqual([row[:2] for row in calls[-4:]], [('GET', '/api/v1/databases'), ('POST', '/api/v1/databases/postgresql'), ('GET', '/api/v1/databases/literal-created'), ('GET', '/api/v1/databases/literal-created/envs')])
                 self.assertTrue(all(auth == 'Bearer synthetic-nosql-token' for _, _, auth, _ in calls))
                 for engine in ['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse']:
                     path = '/api/v1/applications/' + engine + '/envs'
@@ -75,6 +83,9 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 self.assertEqual(fields['DB_PASSWORD'], 'new+secret')
                 self.assertEqual(fields['DB_DATABASE'], 'new db')
                 self.assertTrue(all(b'query-secret' not in body for _, _, _, body in calls))
+                creates = [json.loads(body) for method, path, _, body in calls if method == 'POST' and path == '/api/v1/databases/postgresql']
+                self.assertEqual(len(creates), 1)
+                self.assertEqual(creates[0]['postgres_password'], 'literal-${PROJECT_NAME}-${PROFILE}-+%:@')
             finally:
                 server.shutdown()
 

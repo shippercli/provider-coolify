@@ -702,3 +702,12 @@ with the installed libpq parser without opening a database connection.
 Reference: https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING-URIS
 This covers the named fields above, not every libpq connection parameter or live
 authentication/TLS behavior.
+
+Database passwords are literal values at the provider boundary. Creation
+passwords and engine-specific `*_password` options do not undergo provider
+`${PROJECT_NAME}`/`${PROFILE}` name-macro substitution. Names and descriptive
+metadata retain their existing interpolation. For YAML environment references,
+CLI PR #158 provides single-pass loading so injected secret contents are not
+expanded again inside profile options. This changes configurations that relied
+on provider macros inside passwords; supply the intended password explicitly
+through your secret/configuration workflow instead.

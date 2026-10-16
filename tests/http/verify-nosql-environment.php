@@ -87,3 +87,17 @@ $pgProfile = new class {
 };
 $apply->invoke($provider, $client, 'postgres-query', new stdClass, $pgProfile, $pgEnvironment);
 echo "PostgreSQL query credentials updated consistently before application delivery\n";
+
+$literal = 'literal-${PROJECT_NAME}-${PROFILE}-+%:@';
+$literalProject = new class { public function name(): string { return 'storefront'; } };
+$literalProfile = new class($literal) {
+    public function __construct(private string $password) {}
+    public function name(): string { return 'production'; }
+    public function config(): array { return ['coolify' => ['databases' => [['name' => 'main', 'type' => 'postgresql', 'user' => 'user', 'password' => $this->password]]]]; }
+};
+$literalEnvironment = (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $literalProject, $literalProfile,
+    'project', 'environment', 'production', 'server');
+if (($literalEnvironment['DB_PASSWORD'] ?? null) !== $literal || ($literalEnvironment['SHIPPER_DB_MAIN_PASSWORD'] ?? null) !== $literal) {
+    throw new RuntimeException('Declared database password macros were expanded');
+}
+echo "Literal database creation password preserved across actual HTTP provisioning\n";

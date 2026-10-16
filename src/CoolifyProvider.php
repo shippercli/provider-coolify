@@ -5263,7 +5263,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $type = \strtolower($database['type']);
             $type = $type === 'postgresql' ? 'postgres' : $type;
             $user = $database['user'] !== '' ? $this->interpolate($database['user'], $project, $profile) : 'shipper';
-            $configuredPassword = $database['password'] !== '' ? $this->interpolate($database['password'], $project, $profile) : null;
+            $configuredPassword = $database['password'] !== '' ? $database['password'] : null;
             $providerOptions = $this->databaseProviderOptions($project, $profile, $database);
             $configuredTags = $this->databaseTags($project, $profile, $database['name']);
             $credentialFields = match ($type) {
@@ -5591,7 +5591,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             ? $allOptions[$database['name']]
             : [];
         foreach ($options as $key => $value) {
-            if (\is_string($value)) {
+            if (\is_string($value) && ! \str_ends_with((string) $key, '_password')) {
                 $options[$key] = $this->interpolate($value, $project, $profile);
             }
         }
