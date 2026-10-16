@@ -26,3 +26,27 @@ $profile = new class { public function name(): string { return 'production'; } }
 if (! $provider->plan($project, $profile)['blocked']) throw new RuntimeException('Empty-object database response did not block plan');
 if ($provider->destroy($project, $profile)) throw new RuntimeException('Empty-object database response did not fail destroy');
 echo "HTTP inventory shape and blocked-flow checks passed\n";
+
+$duplicateProject = new class {
+    public function databases(): array {
+        return array_map(static fn ($type) => new class($type) {
+            public function __construct(private string $type) {}
+            public function name(): string { return 'main'; }
+            public function type(): string { return $this->type; }
+        }, ['mysql', 'postgresql']);
+    }
+};
+$overrideProfile = new class {
+    public function name(): string { return 'production'; }
+    public function config(): array { return ['coolify' => ['databases' => ['main' => ['password' => 'synthetic-override']]]]; }
+};
+if (!$provider->plan($duplicateProject, $overrideProfile)['blocked']) throw new RuntimeException('Duplicate project declarations did not block planning');
+$failure = null;
+try {
+    (new ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $duplicateProject, $overrideProfile,
+        'project', 'environment', 'production', 'server');
+} catch (RuntimeException $exception) { $failure = $exception; }
+if ($failure === null || $failure->getMessage() !== 'Coolify project database declarations must have unique names before merging with profile declarations.') {
+    throw new RuntimeException('Duplicate project database merge was accepted');
+}
+echo "Duplicate project declarations rejected before provider HTTP operations\n";

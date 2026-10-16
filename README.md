@@ -666,3 +666,12 @@ variables are written only with `is_preview: true`. Explicit production values
 are not copied into preview requests. The HTTP fixture covers all five engines;
 a negative control enabling production fallback fails the fixture. This verifies
 request scope using synthetic data, not isolation inside a live database server.
+
+Database declaration uniqueness is checked within project declarations before
+merging profile overrides, as it already is within profile declarations. Two
+project declarations cannot silently collapse into one name, even if a profile
+override would hide the conflict. Validation/planning and direct database apply
+reject before API operations. The existing normalized-name check additionally
+rejects punctuation/case and resource-name/preview-truncation collisions before
+namespaced connection fields can overlap. One project declaration plus one
+matching profile override remains supported.
