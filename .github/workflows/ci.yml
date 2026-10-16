@@ -37,6 +37,8 @@ jobs:
         run: python3 tests/http/test_error_diagnostics.py
       - name: Verify bounded HTTP retries
         run: python3 tests/http/test_retries.py
+      - name: Verify non-SQL environment delivery over HTTP
+        run: python3 tests/http/test_nosql_environment.py
       - name: Verify provider distribution archives
         run: python3 tests/package/verify-dist.py
       - name: Audit dependencies

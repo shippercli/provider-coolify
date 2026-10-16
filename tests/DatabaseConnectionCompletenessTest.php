@@ -109,4 +109,74 @@ final class DatabaseConnectionCompletenessTest extends TestCase
             ['DB_CONNECTION' => 'mysql', 'DB_DATABASE' => 'main', 'DB_USERNAME' => 'preview']);
         self::assertSame('preview-secret', $result['SHIPPER_DB_MAIN_PR_42_PASSWORD']);
     }
+    public function testNonSqlConnectionsCannotSilentlyOmitHostOrCredentials(): void
+    {
+        $provider = new CoolifyProvider;
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $required = \in_array($type, ['mongodb', 'clickhouse'], true) ? ['HOST', 'USERNAME', 'PASSWORD'] : ['HOST', 'PASSWORD'];
+            $complete = ['SHIPPER_DB_MAIN_HOST' => 'db.internal', 'SHIPPER_DB_MAIN_USERNAME' => 'user', 'SHIPPER_DB_MAIN_PASSWORD' => 'synthetic-secret'];
+            foreach ($required as $missing) {
+                $partial = $complete;
+                unset($partial['SHIPPER_DB_MAIN_'.$missing]);
+                $failure = null;
+                try {
+                    (new \ReflectionMethod($provider, 'completeDatabaseEnvironment'))->invoke($provider, new \stdClass,
+                        $this->profile([], [['name' => 'main', 'type' => $type]]), $partial);
+                } catch (\RuntimeException $exception) { $failure = $exception; }
+                self::assertInstanceOf(\RuntimeException::class, $failure, $type.'/'.$missing);
+                self::assertStringContainsString('SHIPPER_DB_MAIN_'.$missing, $failure->getMessage());
+                self::assertStringNotContainsString('synthetic-secret', $failure->getMessage());
+            }
+        }
+    }
+
+    public function testNonSqlExplicitEmptyCredentialsRemainDistinctFromUnknown(): void
+    {
+        $provider = new CoolifyProvider;
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $generated = ['SHIPPER_DB_MAIN_HOST' => 'db.internal', 'SHIPPER_DB_MAIN_USERNAME' => '', 'SHIPPER_DB_MAIN_PASSWORD' => ''];
+            $result = (new \ReflectionMethod($provider, 'completeDatabaseEnvironment'))->invoke($provider, new \stdClass,
+                $this->profile([], [['name' => 'main', 'type' => $type]]), $generated);
+            self::assertSame($generated, $result);
+        }
+    }
+
+    public function testIncompleteNonSqlConnectionsStopBeforeApplicationRequests(): void
+    {
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $calls = [];
+            $client = new CoolifyApiClient('https://example.test', 'synthetic', transport: function ($method, $path, $body) use (&$calls): array {
+                $calls[] = [$method, $path, $body];
+                return [];
+            });
+            $provider = new CoolifyProvider;
+            $failure = null;
+            try {
+                (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', new \stdClass,
+                    $this->profile([], [['name' => 'main', 'type' => $type]]), ['SHIPPER_DB_MAIN_HOST' => 'db.internal']);
+            } catch (\RuntimeException $exception) { $failure = $exception; }
+            self::assertInstanceOf(\RuntimeException::class, $failure);
+            self::assertSame([], $calls);
+        }
+    }
+
+    public function testExplicitNonSqlSecretsReachApplicationEnvironment(): void
+    {
+        $calls = [];
+        $client = new CoolifyApiClient('https://example.test', 'synthetic', transport: function ($method, $path, $body) use (&$calls): array {
+            $calls[] = [$method, $path, $body];
+            return [];
+        });
+        $explicit = ['SHIPPER_DB_MAIN_HOST' => 'db.internal', 'SHIPPER_DB_MAIN_PASSWORD' => ''];
+        $provider = new CoolifyProvider;
+        (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', new \stdClass,
+            $this->profile($explicit, [['name' => 'main', 'type' => 'redis']]), []);
+        $writes = \array_values(\array_filter($calls, fn ($call) => $call[0] === 'POST'));
+        self::assertCount(2, $writes);
+        foreach ($writes as $write) {
+            self::assertSame($explicit[$write[2]['key']], $write[2]['value']);
+            self::assertFalse($write[2]['is_preview']);
+        }
+    }
+
 }

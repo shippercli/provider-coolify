@@ -642,3 +642,20 @@ class map. Dependency classes come from the installed checkout; this check does
 not perform a fresh production dependency install or live deployment. CI runs it
 with the existing provider tests. Git export verification uses current worktree
 attributes; committed attributes determine subsequent GitHub source archives.
+
+### Non-SQL connection delivery checks
+
+Before application environment reads/writes, Redis, Dragonfly and KeyDB
+connections require namespaced `SHIPPER_DB_<NAME>_HOST` and `_PASSWORD` string
+values. MongoDB and ClickHouse additionally require `_USERNAME`. The host must
+be nonempty. Credentials may be explicitly empty strings; absence is not
+silently interpreted as passwordless authentication. Explicit application
+variables can supply unavailable values, with existing preview isolation and
+precedence rules. These engines do not borrow unrelated SQL `DB_*` defaults.
+
+This is a minimum field-delivery check, not a connection test. Port/database
+selection, MongoDB authentication database, replica-set/SRV topology, TLS and
+engine-specific client configuration still require application and live
+verification. A failure can occur after earlier resource operations; deployment
+is not transactional. MongoDB connection formats are described at
+https://www.mongodb.com/docs/manual/reference/connection-string/.

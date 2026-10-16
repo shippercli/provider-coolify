@@ -5845,6 +5845,21 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 continue;
             }
             if (! \in_array($type, ['mysql', 'mariadb', 'postgres', 'postgresql'], true)) {
+                if (\in_array($type, ['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'], true)) {
+                    $name = $this->databaseResourceName($database['name'], $project, $profile);
+                    $prefix = 'SHIPPER_DB_'.\strtoupper(\preg_replace('/[^A-Za-z0-9]+/', '_', $name) ?? $name).'_';
+                    $required = \in_array($type, ['mongodb', 'clickhouse'], true) ? ['HOST', 'USERNAME', 'PASSWORD'] : ['HOST', 'PASSWORD'];
+                    $missing = [];
+                    foreach ($required as $suffix) {
+                        $key = $prefix.$suffix;
+                        if (! \is_string($effective[$key] ?? null) || ($suffix === 'HOST' && $effective[$key] === '')) {
+                            $missing[] = $key;
+                        }
+                    }
+                    if ($missing !== []) {
+                        throw new \RuntimeException('Coolify database connection is incomplete; supply explicit application environment values for: '.\implode(', ', $missing));
+                    }
+                }
                 continue;
             }
             $name = $this->databaseResourceName($database['name'], $project, $profile);
