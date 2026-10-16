@@ -4519,8 +4519,10 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             }
         }
 
+        $creationInventory = [];
         if ($app === null) {
-            foreach ($this->validateApplicationInventory($this->list($client->request('GET', '/applications')), $tag) as $candidate) {
+            $creationInventory = $this->validateApplicationInventory($this->list($client->request('GET', '/applications')), $tag);
+            foreach ($creationInventory as $candidate) {
                 if (($candidate['name'] ?? null) === $name) {
                     throw new \RuntimeException('Refusing to create a duplicate Coolify application: its name already exists without matching project/profile ownership tags. Review and migrate the existing application explicitly.');
                 }
@@ -4689,7 +4691,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             } else {
                 $endpoint = '/applications/public';
             }
-            $app = $client->request('POST', $endpoint, $payload);
+            $app = $this->checkedResourceCreation($client->request('POST', $endpoint, $payload), $payload, $creationInventory, $tag, 'application');
         } else {
             $uuid = $this->resourceUuid($app);
             if ($uuid === '') {
@@ -5162,7 +5164,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         $isNewService = $service === null;
         if ($isNewService) {
-            foreach ($this->validateServiceInventory($this->list($client->request('GET', '/services')), $tag) as $candidate) {
+            $creationInventory = $this->validateServiceInventory($this->list($client->request('GET', '/services')), $tag);
+            foreach ($creationInventory as $candidate) {
                 if ($this->hasTag($candidate, $tag) && $this->hasTag($candidate, self::MARKER)) {
                     throw new \RuntimeException('Coolify service inventory disagrees with the scoped lookup; refusing duplicate creation.');
                 }
@@ -5173,7 +5176,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             if (\is_string($serviceSettings['destination_uuid'] ?? null)) {
                 $payload['destination_uuid'] = $serviceSettings['destination_uuid'];
             }
-            $service = $client->request('POST', '/services', $payload);
+            $service = $this->checkedResourceCreation($client->request('POST', '/services', $payload), $payload, $creationInventory, $tag, 'service');
         } else {
             $uuid = $this->resourceUuid($service);
             $existingType = \is_string($service['service_type'] ?? null) ? $service['service_type'] : '';
@@ -6428,6 +6431,21 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
             throw $exception;
         }
+    }
+
+    /** @param array<string, mixed> $response
+     *  @param array<string, mixed> $payload
+     *  @param array<int, array<string, mixed>> $inventory
+     *  @return array<string, mixed>
+     */
+    private function checkedResourceCreation(array $response, array $payload, array $inventory, string $tag, string $kind): array
+    {
+        $uuid = $this->resourceUuid($response);
+        if ($uuid === '' || $uuid !== \trim($uuid) || \in_array($uuid, \array_column($inventory, 'uuid'), true)) {
+            throw new \RuntimeException("Coolify {$kind} creation response has an invalid or reused identity.");
+        }
+        $known = \array_merge($payload, ['uuid' => $uuid]);
+        return $this->checkedResourceUpdate($known, $response, $uuid, $tag, $kind);
     }
 
     /** @param array<string, mixed> $response */

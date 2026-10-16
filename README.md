@@ -522,3 +522,18 @@ live authentication remain unverified.
 Rejection tests also guard against treating PHPUnit assertion failures as expected
 runtime exceptions. This keeps a test's own failure from satisfying its exception
 check.
+
+### Application and service creation responses
+
+Automatic application/service creation requires a non-empty identity not already
+present in the complete preflight inventory. Supplied top-level/nested UUIDs must
+agree; explicit null, empty or whitespace identities are refused. Returned
+metadata must remain readable and preserve the requested scope ownership when
+merged with the request. Valid UUID-only acknowledgements remain supported;
+nested UUID acknowledgements are normalized to a top-level known identity.
+
+The request supplies metadata omitted from a thin acknowledgement. This is not
+independent read-back proof that Coolify persisted every requested setting. The
+POST can already have created a resource before an invalid response is detected;
+follow-up operations stop and account review may be required. Concurrent creations,
+other API surfaces and live runtime verification remain unfinished.
