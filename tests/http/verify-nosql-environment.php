@@ -64,3 +64,15 @@ foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
     $apply->invoke($provider, $client, $type.'-preview', $project, $makeProfile($preview), []);
 }
 echo "Five missing preview passwords blocked and five preview-only environments delivered\n";
+
+$environment = [];
+$url = 'mongodb://user:old-secret@first.internal:27017,second.internal:27018/main?replicaSet=rs0&authSource=admin&tls=true';
+$args = [&$environment, 'mongodb', 'main', ['internal_db_url' => $url], null, null,
+    ['mongo_initdb_root_password' => 'updated:@secret']];
+(new ReflectionMethod($provider, 'mergeDatabaseEnvironment'))->invokeArgs($provider, $args);
+$urlProfile = new class {
+    public function name(): string { return 'production'; }
+    public function config(): array { return ['coolify' => ['databases' => [['name' => 'main', 'type' => 'mongodb']]]]; }
+};
+$apply->invoke($provider, $client, 'mongodb-url', new stdClass, $urlProfile, $environment);
+echo "Full MongoDB URL with updated credentials delivered to application environment\n";

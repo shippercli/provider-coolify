@@ -675,3 +675,17 @@ reject before API operations. The existing normalized-name check additionally
 rejects punctuation/case and resource-name/preview-truncation collisions before
 namespaced connection fields can overlap. One project declaration plus one
 matching profile override remains supported.
+
+When Coolify provides an internal database connection URL, Shipper additionally
+exports `SHIPPER_DB_<NAME>_URL`. It preserves the scheme, authority/seed hosts,
+path and query options rather than reducing the connection to scalar fields.
+Known credential updates are percent-encoded into the userinfo; explicit database
+updates replace the encoded path while retaining options. An explicit empty
+password remains empty, not replaced by an old URL password. Malformed URL
+structure fails with a fixed diagnostic without echoing the URL.
+
+The URL follows existing generated-environment scope and explicit override rules;
+it does not automatically set a framework-specific default URL variable. Configure
+the application to consume it when options/topology matter. This preserves the
+reported connection description; driver compatibility, authentication and live
+connectivity remain unverified.

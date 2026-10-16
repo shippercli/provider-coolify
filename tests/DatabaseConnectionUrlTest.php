@@ -27,6 +27,7 @@ final class DatabaseConnectionUrlTest extends TestCase
                 self::assertSame($password, $environment['DB_PASSWORD']);
                 self::assertSame('database.internal', $environment['DB_HOST']);
                 self::assertSame('3307', $environment['DB_PORT']);
+                self::assertSame($url, $environment['SHIPPER_DB_MAIN_URL']);
             }
         }
     }
@@ -44,4 +45,50 @@ final class DatabaseConnectionUrlTest extends TestCase
         self::assertSame('user%40team', $environment['DB_USERNAME']);
         self::assertSame('secret%2Bvalue', $environment['DB_PASSWORD']);
     }
+    public function testFullUrlsPreserveMongoTopologyAndQueryOptions(): void
+    {
+        foreach (['mongodb+srv://user:secret@cluster.internal/main?authSource=admin&tls=true',
+            'mongodb://user:secret@first.internal:27017,second.internal:27018/main?replicaSet=rs0&authSource=admin'] as $url) {
+            $environment = [];
+            $args = [&$environment, 'mongodb', 'main', ['internal_db_url' => $url], null, null];
+            (new \ReflectionMethod(new CoolifyProvider, 'mergeDatabaseEnvironment'))->invokeArgs(new CoolifyProvider, $args);
+            self::assertSame($url, $environment['SHIPPER_DB_MAIN_URL'] ?? null);
+        }
+    }
+
+    public function testFullUrlUsesUpdatedCredentialsWithoutLosingOptions(): void
+    {
+        $environment = [];
+        $args = [&$environment, 'mysql', 'main',
+            ['internal_db_url' => 'mysql://known-user:old-secret@db.internal:3307/old?sslmode=require'], null, null,
+            ['mysql_password' => 'updated:@secret', 'mysql_database' => 'sales reports']];
+        $provider = new CoolifyProvider;
+        (new \ReflectionMethod($provider, 'mergeDatabaseEnvironment'))->invokeArgs($provider, $args);
+        self::assertSame('mysql://known-user:updated%3A%40secret@db.internal:3307/sales%20reports?sslmode=require', $environment['SHIPPER_DB_MAIN_URL'] ?? null);
+        self::assertStringNotContainsString('old-secret', $environment['SHIPPER_DB_MAIN_URL']);
+    }
+
+    public function testEmptyPasswordUpdatesRemainExplicitInFullUrls(): void
+    {
+        $environment = [];
+        $args = [&$environment, 'mysql', 'main', ['internal_db_url' => 'mysql://user:old-secret@db.internal/main?tls=true'], null, null,
+            ['mysql_password' => '']];
+        $provider = new CoolifyProvider;
+        (new \ReflectionMethod($provider, 'mergeDatabaseEnvironment'))->invokeArgs($provider, $args);
+        self::assertSame('mysql://user:@db.internal/main?tls=true', $environment['SHIPPER_DB_MAIN_URL']);
+        self::assertSame('', $environment['SHIPPER_DB_MAIN_PASSWORD']);
+    }
+
+    public function testMalformedUrlDiagnosticsDoNotEchoCredentials(): void
+    {
+        $environment = [];
+        $args = [&$environment, 'mysql', 'main', ['internal_db_url' => 'synthetic-secret'], null, null];
+        $provider = new CoolifyProvider;
+        $failure = null;
+        try { (new \ReflectionMethod($provider, 'mergeDatabaseEnvironment'))->invokeArgs($provider, $args); }
+        catch (\RuntimeException $exception) { $failure = $exception; }
+        self::assertInstanceOf(\RuntimeException::class, $failure);
+        self::assertSame('Coolify returned an invalid database connection URL.', $failure->getMessage());
+    }
+
 }

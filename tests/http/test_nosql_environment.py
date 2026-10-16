@@ -33,7 +33,7 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-nosql-environment.php')),
                     f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(len(calls), 34)
+                self.assertEqual(len(calls), 41)
                 self.assertTrue(all(auth == 'Bearer synthetic-nosql-token' for _, _, auth, _ in calls))
                 for engine in ['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse']:
                     path = '/api/v1/applications/' + engine + '/envs'
@@ -55,6 +55,16 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                     self.assertEqual(len(rows), len(expected))
                     self.assertTrue(all(row['is_preview'] is True for row in rows))
                 self.assertTrue(all(b'production-secret' not in body for _, _, _, body in calls))
+                url_calls = [call for call in calls if call[1] == '/api/v1/applications/mongodb-url/envs']
+                self.assertEqual(sum(method == 'GET' for method, _, _, _ in url_calls), 1)
+                rows = [json.loads(body) for method, _, _, body in url_calls if method == 'POST']
+                self.assertEqual(len(rows), 6)
+                expected_url = 'mongodb://user:updated%3A%40secret@first.internal:27017,second.internal:27018/main?replicaSet=rs0&authSource=admin&tls=true'
+                self.assertTrue(all(row['is_preview'] is False for row in rows))
+                fields = {row['key']: row['value'] for row in rows}
+                self.assertEqual(fields['SHIPPER_DB_MAIN_URL'], expected_url)
+                self.assertEqual(fields['SHIPPER_DB_MAIN_PASSWORD'], 'updated:@secret')
+                self.assertTrue(all(b'old-secret' not in body for _, _, _, body in calls))
             finally:
                 server.shutdown()
 

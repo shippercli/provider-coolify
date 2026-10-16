@@ -5970,12 +5970,39 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             }
         }
         $prefix = 'SHIPPER_DB_'.\strtoupper(\preg_replace('/[^A-Za-z0-9]+/', '_', $name) ?? $name).'_';
+        if ($type !== 'sqlite' && \is_string($url) && $url !== '' && ! \array_key_exists($prefix.'URL', $environment)) {
+            $environment[$prefix.'URL'] = $this->applicationDatabaseUrl($url, $config, $databaseKey, $credentialOverrides);
+        }
         foreach (['host' => 'HOST', 'port' => 'PORT', 'database' => 'DATABASE', 'username' => 'USERNAME', 'password' => 'PASSWORD'] as $key => $suffix) {
             if (! \array_key_exists($prefix.$suffix, $environment) && \is_string($config[$key] ?? null)
                 && ($config[$key] !== '' || ($key === 'password' && $explicitEmptyPassword))) {
                 $environment[$prefix.$suffix] = $config[$key];
             }
         }
+    }
+
+    /** @param array<string, mixed> $config @param array<string, mixed> $overrides */
+    private function applicationDatabaseUrl(string $url, array $config, ?string $databaseKey, array $overrides): string
+    {
+        if (\preg_match('~\A([A-Za-z][A-Za-z0-9+.-]*://)([^/?#]+)([^?#]*)(.*)\z~D', $url, $parts) !== 1) {
+            throw new \RuntimeException('Coolify returned an invalid database connection URL.');
+        }
+        $authority = $parts[2];
+        $at = \strrpos($authority, '@');
+        $userinfo = $at === false ? null : \substr($authority, 0, $at);
+        $hosts = $at === false ? $authority : \substr($authority, $at + 1);
+        if ($hosts === '') throw new \RuntimeException('Coolify returned an invalid database connection URL.');
+        if (\is_string($config['username'] ?? null) || \is_string($config['password'] ?? null)) {
+            $existing = $userinfo === null ? [] : \explode(':', $userinfo, 2);
+            $username = \is_string($config['username'] ?? null) ? \rawurlencode($config['username']) : ($existing[0] ?? '');
+            $password = \is_string($config['password'] ?? null) ? \rawurlencode($config['password']) : ($existing[1] ?? null);
+            $userinfo = $username.($password === null ? '' : ':'.$password);
+        }
+        $path = $parts[3];
+        if ($databaseKey !== null && \array_key_exists($databaseKey, $overrides) && \is_string($overrides[$databaseKey])) {
+            $path = '/'.\rawurlencode($overrides[$databaseKey]);
+        }
+        return $parts[1].($userinfo === null ? '' : $userinfo.'@').$hosts.$path.$parts[4];
     }
 
     private function scheduledTasksPath(string $resourceType, string $resourceUuid): string
