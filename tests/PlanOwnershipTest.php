@@ -15,6 +15,7 @@ final class PlanOwnershipTest extends TestCase
             $calls = [];
             $client = new CoolifyApiClient('https://coolify.example.com', 'token', transport: static function (string $method, string $path, ?array $body) use (&$calls, $mode, $tag): array {
                 $calls[] = [$method, $path];
+                if ($path === '/databases') return [];
                 if ($mode === 'error') throw new \RuntimeException('sensitive API detail');
                 if ($mode === 'malformed') return ['message' => 'unexpected'];
                 $app = ['uuid' => $mode === 'invalid-identity' ? '' : 'existing', 'name' => 'api-preview', 'tags' => $mode === 'owned' ? ['shippercli-managed', $tag] : ['shippercli-managed', 'other-scope']];

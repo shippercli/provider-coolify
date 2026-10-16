@@ -744,6 +744,15 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         } catch (\Throwable) {
             $blocked = 'Unable to verify Coolify application ownership. Review API access and exact project/profile tags before deployment.';
         }
+        if ($blocked === null) {
+            try {
+                $scope = $this->resourceTag($project, $profile);
+                if (($pr = $this->pullRequestId($profile)) !== '') $scope .= '-pr-'.$pr;
+                $this->validateDatabaseInventory($this->list($this->getClient()->request('GET', '/databases')), $scope);
+            } catch (\Throwable) {
+                $blocked = 'Unable to verify Coolify database inventory and ownership. Review API access and resource tags before deployment.';
+            }
+        }
         $actions = [
             'Resolve or create the Coolify project and profile environment',
             'Create or update the owned application '.$name,
@@ -964,6 +973,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         try {
             $client = $this->getClient();
             $tag = $this->resourceTag($project, $profile);
+            $ownedDatabases = $this->ownedDatabasesForProfile($client, $tag);
             $apps = $this->list($client->request('GET', '/applications?tag='.\rawurlencode($tag)));
             foreach ($apps as $app) {
                 if (! $this->hasTag($app, $tag) || ! $this->hasTag($app, self::MARKER)) {
@@ -1007,7 +1017,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 }
             }
 
-            foreach ($this->ownedDatabasesForProfile($client, $tag) as $database) {
+            foreach ($ownedDatabases as $database) {
                 $uuid = $this->resourceUuid($database);
                 if ($uuid !== '') {
                     $client->request('DELETE', '/databases/'.\rawurlencode($uuid));
@@ -2135,6 +2145,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         try {
             $client = $this->getClient();
+            $previewTag = $this->resourceTag($project, $profile).'-pr-'.$pullRequestId;
+            $ownedDatabases = $this->ownedDatabases($client, $previewTag);
             $app = $this->findApplicationIfPresent($client, $project, $profile);
             if ($app !== null && (! $this->hasTag($app, self::MARKER)
                 || ! $this->hasTag($app, $this->resourceTag($project, $profile)))) {
@@ -2150,7 +2162,6 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                     }
                 }
             }
-            $previewTag = $this->resourceTag($project, $profile).'-pr-'.$pullRequestId;
             foreach ($this->ownedApplications($client, $project, $profile, $previewTag) as $worker) {
                 $workerUuid = $this->resourceUuid($worker);
                 $workerName = $worker['name'] ?? '';
@@ -2161,7 +2172,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                     $client->request('DELETE', '/applications/'.\rawurlencode($workerUuid));
                 }
             }
-            foreach ($this->ownedDatabases($client, $previewTag) as $database) {
+            foreach ($ownedDatabases as $database) {
                 $databaseUuid = $this->resourceUuid($database);
                 if ($databaseUuid !== '') {
                     $client->request('DELETE', '/databases/'.\rawurlencode($databaseUuid));
@@ -5414,7 +5425,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @param array<int, array<string, mixed>> $inventory
      *  @return array<int, array<string, mixed>>
      */
-    private function validateDatabaseInventory(array $inventory, string $scope): array
+    private function validateDatabaseInventory(array $inventory, string $scope, bool $includePreviews = false): array
     {
         $identities = [];
         $owners = [];
@@ -5445,13 +5456,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             }
             $database['tags'] = $tags;
             $inventory[$index] = $database;
-            if (! $this->hasTag($database, self::MARKER) || ! $this->hasDatabaseScopeTag($database, $scope, false)) {
+            if (! $this->hasTag($database, self::MARKER) || ! $this->hasDatabaseScopeTag($database, $scope, $includePreviews)) {
                 continue;
             }
             $ownershipTags = \array_values(\array_filter($tags, static fn (string $tag): bool =>
                 \preg_match('/\Ashippercli-[a-f0-9]{16}(?:-pr-[1-9][0-9]*)?(?:-db-[a-f0-9]{10})?\z/', $tag) === 1));
             if (\count($ownershipTags) !== 1
-                || \preg_match('/\A'.\preg_quote($scope, '/').'-db-[a-f0-9]{10}\z/', $ownershipTags[0]) !== 1
+                || \preg_match('/\A'.\preg_quote($scope, '/').($includePreviews ? '(?:-pr-[1-9][0-9]*)?' : '').'-db-[a-f0-9]{10}\z/', $ownershipTags[0]) !== 1
                 || isset($owners[$ownershipTags[0]])) {
                 throw new \RuntimeException('Coolify database inventory has ambiguous or legacy ownership; review its resource tags.');
             }
@@ -6351,7 +6362,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function ownedDatabases(CoolifyApiClient $client, string $tag): array
     {
         return \array_values(\array_filter(
-            $this->list($client->request('GET', '/databases')),
+            $this->validateDatabaseInventory($this->list($client->request('GET', '/databases')), $tag),
             fn (array $database): bool => $this->hasDatabaseScopeTag($database, $tag, false) && $this->hasTag($database, self::MARKER),
         ));
     }
@@ -6360,7 +6371,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function ownedDatabasesForProfile(CoolifyApiClient $client, string $resourceTag): array
     {
         return \array_values(\array_filter(
-            $this->list($client->request('GET', '/databases')),
+            $this->validateDatabaseInventory($this->list($client->request('GET', '/databases')), $resourceTag, true),
             function (array $database) use ($resourceTag): bool {
                 if (! $this->hasTag($database, self::MARKER)) {
                     return false;
@@ -6377,7 +6388,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $pattern = '/\A'.preg_quote($scope, '/').$preview.'(?:-db-[a-f0-9]{10})?\z/';
         foreach ($this->tagNames($database['tags'] ?? []) as $tag) {
             if (preg_match($pattern, $tag, $matches) === 1
-                && (! isset($matches[1]) || (int) $matches[1] > 0)) {
+                && (! isset($matches[1]) || \filter_var($matches[1], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) !== false)) {
                 return true;
             }
         }

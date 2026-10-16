@@ -173,7 +173,7 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
                 return [['uuid' => 'worker-43', 'name' => 'storefront-preview-pr-43-queue-worker-1', 'tags' => [$previewTag, 'shippercli-managed']]];
             }
             if ($method === 'GET' && $path === '/databases') {
-                return [['uuid' => 'database-43', 'name' => 'storefront-preview-pr-43', 'tags' => [$previewTag, 'shippercli-managed']]];
+                return [['uuid' => 'database-43', 'name' => 'storefront-preview-pr-43', 'tags' => [$previewTag.'-db-0123456789', 'shippercli-managed']]];
             }
 
             return [];
@@ -250,7 +250,7 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
                 return [['uuid' => 'worker-43', 'name' => 'storefront-preview-pr-43-queue-worker-1', 'tags' => [$previewTag, 'shippercli-managed']]];
             }
             if ($method === 'GET' && $path === '/databases') {
-                return [['uuid' => 'database-43', 'name' => 'storefront-preview-pr-43', 'tags' => [$previewTag, 'shippercli-managed']]];
+                return [['uuid' => 'database-43', 'name' => 'storefront-preview-pr-43', 'tags' => [$previewTag.'-db-0123456789', 'shippercli-managed']]];
             }
 
             return [];

@@ -416,7 +416,7 @@ once when converted to environment variables. Literal values returned in separat
 API fields are not URL-decoded. Plus signs remain plus signs; encoded percent
 characters are not decoded a second time.
 
-### Database inventory preflight during apply
+### Database inventory and ownership preflight
 
 Before database reconciliation, apply validates the entire returned database
 inventory. Rows need unique non-empty UUIDs, readable names and tag lists. String
@@ -425,8 +425,15 @@ rejected. Each database owned by the exact current scope must carry exactly one
 unambiguous per-database ownership tag. Multiple resources with that tag, multiple
 Shipper ownership tags on one resource, and legacy scope-only tags require review.
 
-This check runs before creating, moving, updating or deleting any database, so an
-ambiguous later declaration cannot permit earlier database changes. Application
-reconciliation may already have occurred. It does not authenticate manually
-editable tags, resolve concurrent changes, or extend this preflight to every plan
-and cleanup path; those remain under review.
+During apply, this check runs before database creation, movement, updates or
+removal; application reconciliation may already have occurred. Plans also inspect
+database ownership using read-only requests and block on unavailable or ambiguous
+inventory. Profile destroy and pull-request cleanup preflight database inventory
+before deleting any application, worker or database. Database status/log selection
+uses the same validation. Scope-only legacy database tags must be reviewed and
+migrated before these operations; they no longer authorize removal. Invalid or
+overflowing preview IDs are not treated as owned previews.
+
+This does not authenticate manually editable tags, prevent changes after a read,
+or validate every non-database resource inventory. Shared resource concurrency,
+other prerequisite checks, migration review and live operation remain unfinished.

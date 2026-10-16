@@ -221,7 +221,7 @@ final class CoolifyProviderTest extends TestCase
             transport: static function (string $method, string $path, ?array $body) use (&$calls, $tag): array {
                 $calls[] = [$method, $path, $body];
                 if ($path === '/databases') {
-                    return [['uuid' => 'db-primary', 'name' => 'primary', 'tags' => [$tag, 'shippercli-managed']]];
+                    return [['uuid' => 'db-primary', 'name' => 'primary', 'tags' => [$tag.'-db-'.substr(hash('sha256', 'primary'), 0, 10), 'shippercli-managed']]];
                 }
                 if ($path === '/databases/db-primary/logs?lines=100&show_timestamps=0') {
                     return ['logs' => "db ready\nconnected\n"];

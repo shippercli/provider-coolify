@@ -17,16 +17,16 @@ final class ApplicationOwnershipTest extends TestCase
             public function config(): array { return []; }
         };
         $tag = 'shippercli-'.substr(hash('sha256', json_encode(['api', 'preview'], JSON_THROW_ON_ERROR)), 0, 16);
-        $database = ['uuid' => 'db-preview-42', 'tags' => ['shippercli-managed', $tag.'-pr-42-db-0123456789']];
+        $database = ['uuid' => 'db-preview-42', 'name' => 'db-preview-42', 'tags' => ['shippercli-managed', $tag.'-pr-42-db-0123456789']];
         $calls = [];
         $client = new CoolifyApiClient('https://coolify.example.com', 'token', transport: static function (string $method, string $path, ?array $body) use (&$calls, $database, $tag): array {
             $calls[] = [$method, $path];
             if ($method === 'GET' && $path === '/databases') {
                 return [$database,
-                    ['uuid' => 'wrong-scope', 'tags' => ['shippercli-managed', 'other-pr-43-db-0123456789']],
-                    ['uuid' => 'unmanaged', 'tags' => [$tag.'-pr-44-db-0123456789']],
-                    ['uuid' => 'invalid', 'tags' => ['shippercli-managed', $tag.'-pr-45-db-invalid']],
-                    ['uuid' => 'overflow', 'tags' => ['shippercli-managed', $tag.'-pr-'.str_repeat('9', 30).'-db-0123456789']],
+                    ['uuid' => 'wrong-scope', 'name' => 'wrong-scope', 'tags' => ['shippercli-managed', 'other-pr-43-db-0123456789']],
+                    ['uuid' => 'unmanaged', 'name' => 'unmanaged', 'tags' => [$tag.'-pr-44-db-0123456789']],
+                    ['uuid' => 'invalid', 'name' => 'invalid', 'tags' => ['shippercli-managed', $tag.'-pr-45-db-invalid']],
+                    ['uuid' => 'overflow', 'name' => 'overflow', 'tags' => ['shippercli-managed', $tag.'-pr-'.str_repeat('9', 30).'-db-0123456789']],
                 ];
             }
             return [];
@@ -99,14 +99,17 @@ final class ApplicationOwnershipTest extends TestCase
 
     public function testDatabaseCleanupRejectsMalformedPreviewTagSuffixes(): void
     {
-        $client = new CoolifyApiClient('https://coolify.example.com', 'token', transport: static function (): array {
-            return array_map(static fn (string $suffix): array => ['uuid' => $suffix, 'tags' => ['shippercli-managed', 'scope'.$suffix]], ['', '-pr-42', '-db-0123456789', '-pr-42-db-0123456789', '-pr-', '-pr-0', '-pr-no', '-pr-42-other', '-db-invalid']);
+        $scope = 'shippercli-0123456789abcdef';
+        $client = new CoolifyApiClient('https://coolify.example.com', 'token', transport: static function () use ($scope): array {
+            return array_map(static fn (string $suffix): array => ['uuid' => 'db'.$suffix, 'name' => 'db'.$suffix,
+                'tags' => ['shippercli-managed', $scope.$suffix]],
+                ['-db-0123456789', '-pr-42-db-0123456789', '-pr-', '-pr-0', '-pr-no', '-pr-42-other', '-db-invalid', '-pr-'.str_repeat('9', 30).'-db-0123456789']);
         });
         $provider = new CoolifyProvider([], $client);
-        $databases = (new \ReflectionMethod($provider, 'ownedDatabasesForProfile'))->invoke($provider, $client, 'scope');
-        self::assertSame(['', '-pr-42', '-db-0123456789', '-pr-42-db-0123456789'], array_column($databases, 'uuid'));
-        $exact = (new \ReflectionMethod($provider, 'ownedDatabases'))->invoke($provider, $client, 'scope');
-        self::assertSame(['', '-db-0123456789'], array_column($exact, 'uuid'));
+        $databases = (new \ReflectionMethod($provider, 'ownedDatabasesForProfile'))->invoke($provider, $client, $scope);
+        self::assertSame(['db-db-0123456789', 'db-pr-42-db-0123456789'], array_column($databases, 'uuid'));
+        $exact = (new \ReflectionMethod($provider, 'ownedDatabases'))->invoke($provider, $client, $scope);
+        self::assertSame(['db-db-0123456789'], array_column($exact, 'uuid'));
     }
 
     public function testSameNameServicesAndDatabasesWithOtherOwnershipBlockCreation(): void
