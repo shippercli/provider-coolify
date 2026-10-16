@@ -23,6 +23,8 @@ class StatusPrivacyTest(unittest.TestCase):
                 data = []
                 if self.path == '/api/v1/applications/app-1':
                     data = {'uuid': 'app-1', 'id': 1, 'name': 'fixture', 'status': 'running', 'tags': ['shippercli-managed', scope]}
+                elif self.path == '/api/v1/applications/app-1/rollback-images':
+                    data = {'current': 'current-image', 'images': [{'tag': 'previous-image', 'is_current': False, 'credentials': 'synthetic-status-secret'}], 'extra': 'synthetic-status-secret'}
                 elif self.path == '/api/v1/databases':
                     data = [{'uuid': 'db-1', 'name': 'main', 'type': 'mysql', 'tags': ['shippercli-managed', scope + '-db-0123456789']}]
                 elif self.path == '/api/v1/databases/db-1':

@@ -7,6 +7,7 @@ namespace ShipperCli\ProviderCoolify\Tests;
 use PHPUnit\Framework\TestCase;
 use ShipperCli\ProviderCoolify\CoolifyApiClient;
 use ShipperCli\ProviderCoolify\CoolifyProvider;
+use ShipperCli\ProviderCoolify\CoolifyMcpClient;
 
 final class StatusSafetyTest extends TestCase
 {
@@ -17,6 +18,7 @@ final class StatusSafetyTest extends TestCase
         $client = new CoolifyApiClient('https://coolify.example.test', 'synthetic-token', transport: static function (string $method, string $path) use ($scope, $taskPrefix): array {
             self::assertSame('GET', $method);
             if ($path === '/applications/app-1') return ['uuid' => 'app-1', 'id' => 1, 'name' => 'fixture', 'status' => 'running', 'tags' => ['shippercli-managed', $scope]];
+            if ($path === '/applications/app-1/rollback-images') return ['current' => 'current-image', 'images' => [['tag' => 'previous-image', 'created_at' => '2026-10-16T12:00:00Z', 'is_current' => false, 'credentials' => 'synthetic-status-secret']], 'extra' => 'synthetic-status-secret'];
             if ($path === '/applications/app-1/scheduled-tasks') return [['uuid' => 'task-1', 'name' => $taskPrefix.'nightly', 'command' => 'echo synthetic-status-secret', 'frequency' => 'daily', 'enabled' => true]];
             if ($path === '/applications/app-1/scheduled-tasks/task-1/executions') return [['uuid' => 'execution-1', 'status' => 'success', 'created_at' => '2026-10-16T12:00:00Z', 'output' => 'synthetic-status-secret', 'extra' => ['token' => 'synthetic-status-secret']]];
             if ($path === '/deployments' || str_starts_with($path, '/deployments/applications/app-1?')) return [[
@@ -31,13 +33,26 @@ final class StatusSafetyTest extends TestCase
             public function name(): string { return 'production'; }
             public function config(): array { return []; }
         };
-        $status = (new CoolifyProvider(['application_uuid' => 'app-1'], $client))->status($project, $profile);
+        $mcp = new CoolifyMcpClient('https://coolify.example.test', 'synthetic-token', transport: static function (array $message): array {
+            if ($message['method'] === 'notifications/initialized') return ['status' => 202, 'headers' => [], 'body' => ''];
+            $result = match ($message['method']) {
+                'initialize' => ['protocolVersion' => '2025-11-25'],
+                'tools/list' => ['tools' => [['name' => 'list_application_previews']]],
+                'tools/call' => ['structuredContent' => ['data' => ['previews' => [['uuid' => 'preview-1', 'pull_request_id' => 42, 'status' => 'running', 'env' => 'synthetic-status-secret']]]]],
+                default => throw new \RuntimeException('Unexpected fixture RPC'),
+            };
+            return ['status' => 200, 'headers' => [], 'body' => json_encode(['jsonrpc' => '2.0', 'id' => $message['id'], 'result' => $result], JSON_THROW_ON_ERROR)];
+        });
+        $status = (new CoolifyProvider(['application_uuid' => 'app-1', 'mcp_enabled' => true], $client, $mcp))->status($project, $profile);
         self::assertStringNotContainsString('synthetic-status-secret', json_encode($status, JSON_THROW_ON_ERROR));
         self::assertSame('deployment-1', $status['latest_deployment']['deployment_uuid']);
         self::assertSame('finished', $status['deployment_history'][0]['status']);
         self::assertSame('deployment-1', $status['running_deployments'][0]['deployment_uuid']);
         self::assertSame('execution-1', $status['scheduled_tasks'][0]['latest_execution']['uuid']);
         self::assertArrayNotHasKey('command', $status['scheduled_tasks'][0]);
+        self::assertSame('previous-image', $status['rollback_images']['images'][0]['tag']);
+        self::assertFalse($status['rollback_images']['images'][0]['is_current']);
+        self::assertSame(42, $status['previews'][0]['pull_request_id']);
     }
     public function testDeploymentSummaryDropsUnknownFieldsAndNestedValues(): void
     {
@@ -89,6 +104,19 @@ final class StatusSafetyTest extends TestCase
             self::assertNull($failure);
             self::assertStringNotContainsString('synthetic-backup-secret', json_encode($result, JSON_THROW_ON_ERROR));
             self::assertSame(['uuid' => 'backup-execution-1', 'status' => 'success'], $result[0]['backup_executions'][0]);
+        }
+    }
+
+    public function testMalformedRollbackImageStatusIsRefused(): void
+    {
+        $provider = new CoolifyProvider;
+        $method = new \ReflectionMethod($provider, 'rollbackImageStatusSummary');
+        foreach ([['images' => null], ['images' => ['token' => 'synthetic-secret']], ['images' => ['synthetic-secret']], ['images' => [['tag' => null]]]] as $payload) {
+            $failure = null;
+            try { $method->invoke($provider, $payload); }
+            catch (\RuntimeException $error) { $failure = $error; }
+            self::assertInstanceOf(\RuntimeException::class, $failure);
+            self::assertSame('Coolify rollback image status is unreadable.', $failure->getMessage());
         }
     }
 

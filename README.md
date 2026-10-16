@@ -740,3 +740,9 @@ output and extra credential-bearing fields are omitted, and malformed execution
 lists are refused with a fixed diagnostic. Both direct lists and the existing
 `executions` wrapper are supported. Explicit backup execution/output API methods
 are unchanged.
+
+Status also summarizes rollback images to current/tag, creation time and current
+selection flag, refusing malformed image lists. Opt-in preview status includes
+only scalar identifiers, state and timestamps; raw preview configuration and URLs
+are omitted. Explicit image/preview API methods keep their original responses.
+Injected MCP fixtures verify the preview summary without connecting to a server.

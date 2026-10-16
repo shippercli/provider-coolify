@@ -1440,6 +1440,29 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             static fn (mixed $value): bool => $value === null || \is_string($value) || \is_int($value));
     }
 
+    /** @param array<string, mixed> $response @return array<string, mixed> */
+    private function rollbackImageStatusSummary(array $response): array
+    {
+        $summary = [];
+        if (\is_string($response['current'] ?? null)) $summary['current'] = $response['current'];
+        if (\array_key_exists('images', $response)) {
+            if (! \is_array($response['images']) || ! \array_is_list($response['images'])) {
+                throw new \RuntimeException('Coolify rollback image status is unreadable.');
+            }
+            $summary['images'] = [];
+            foreach ($response['images'] as $image) {
+                if (! \is_array($image) || ! \is_string($image['tag'] ?? null) || $image['tag'] === '') {
+                    throw new \RuntimeException('Coolify rollback image status is unreadable.');
+                }
+                $row = ['tag' => $image['tag']];
+                if (\is_string($image['created_at'] ?? null)) $row['created_at'] = $image['created_at'];
+                if (\is_bool($image['is_current'] ?? null)) $row['is_current'] = $image['is_current'];
+                $summary['images'][] = $row;
+            }
+        }
+        return $summary;
+    }
+
     public function status(object $project, object $profile): array
     {
         $app = $this->findApplication($this->getClient(), $project, $profile);
@@ -1535,10 +1558,10 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             'running_deployments' => \array_map(fn (array $deployment): array => $this->statusRecordSummary($deployment), $deployments),
             'latest_deployment' => $this->statusRecordSummary($deploymentHistory[0] ?? null),
             'deployment_history' => \array_map(fn (array $deployment): array => $this->statusRecordSummary($deployment), $deploymentHistory),
-            'rollback_images' => $this->applicationRollbackImages($uuid),
+            'rollback_images' => $this->rollbackImageStatusSummary($this->applicationRollbackImages($uuid)),
             'scheduled_tasks' => $this->scheduledTaskStatuses('applications', $uuid, $project, $profile),
             'workloads' => $workloads,
-            'previews' => $this->applicationPreviews($uuid),
+            'previews' => \array_map(fn (array $preview): array => $this->statusRecordSummary($preview), $this->applicationPreviews($uuid)),
             'service' => $serviceStatus,
             'databases' => $databaseStatuses,
             'pull_request_id' => $pullRequestId !== '' ? (int) $pullRequestId : null,
