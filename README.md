@@ -340,3 +340,19 @@ project/profile resource tag before using an existing application. Missing or
 differently scoped tags fail closed before application updates or retagging.
 Review the resource identity and deployment scope separately before explicitly
 migrating tags through Coolify; Shipper does not automatically adopt it.
+
+### Scope encoding and migration
+
+Resource tags use `shippercli-` followed by the first 16 hex characters of the
+SHA-256 hash of `json_encode([projectName, profileName], JSON_THROW_ON_ERROR)`.
+A project-only scope encodes a JSON null profile, distinct from a literal `*`
+profile. Scheduled-task prefixes use the first 10 characters of the same hash.
+This encoding prevents delimiter-containing names from sharing ownership scope.
+
+Tags and task prefixes from older delimiter-based hashes require operator review.
+Verify resource identities, exact project/profile scope, preview IDs, attached
+databases, and scheduled tasks before explicitly migrating tags or task prefixes
+in Coolify. Shipper does not automatically retag resources. A same-name application
+without matching scope blocks creation rather than creating a duplicate. Legacy
+resources are excluded from ownership-based listing and cleanup until migrated.
+Database cleanup accepts only the exact scope tag or a positive numeric PR suffix.

@@ -180,11 +180,11 @@ final class CoolifyProviderTest extends TestCase
             'https://coolify.example.test',
             'api-token',
             transport: static function (string $method, string $path, ?array $body): array {
-                if ($path === '/services?tag='.rawurlencode('shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16))) {
+                if ($path === '/services?tag='.rawurlencode('shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16))) {
                     return [[
                         'uuid' => 'managed-service-uuid',
                         'name' => 'storefront-production-stack',
-                        'tags' => ['shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16), 'shippercli-managed'],
+                        'tags' => ['shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16), 'shippercli-managed'],
                     ]];
                 }
                 if ($path === '/services/managed-service-uuid/logs?sub_service_name=worker&lines=100&show_timestamps=0') {
@@ -213,7 +213,7 @@ final class CoolifyProviderTest extends TestCase
                 ]];
             }
         };
-        $tag = 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16);
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
         $calls = [];
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
@@ -254,7 +254,7 @@ final class CoolifyProviderTest extends TestCase
                 ]];
             }
         };
-        $tag = 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16).'-pr-42';
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16).'-pr-42';
         $calls = [];
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
@@ -539,7 +539,7 @@ final class CoolifyProviderTest extends TestCase
         $ensureApplication->invoke($provider, $client, $project, $profile, 'project-1', 'environment-1', 'production', 'server-1', 'storefront-production', null);
 
         self::assertSame(
-            ['team-web', 'customer-facing', 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16), 'shippercli-managed'],
+            ['team-web', 'customer-facing', 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16), 'shippercli-managed'],
             $requestBody['tags'],
         );
     }
@@ -575,7 +575,7 @@ final class CoolifyProviderTest extends TestCase
             public function branch(): string { return 'main'; }
             public function config(): array { return ['coolify' => ['application' => ['tags' => ['team-web', 'customer-facing']]]]; }
         };
-        $tag = 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16);
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
         $calls = [];
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
@@ -2024,7 +2024,7 @@ final class CoolifyProviderTest extends TestCase
         $profile = new class {
             public function name(): string { return 'production'; }
         };
-        $prefix = 'shipper-'.substr(hash('sha256', 'storefront|production'), 0, 10).'-';
+        $prefix = 'shipper-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 10).'-';
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
             'api-token',
@@ -2280,7 +2280,7 @@ final class CoolifyProviderTest extends TestCase
                 $calls[] = [$method, $path, $body];
 
                 return match ([$method, $path]) {
-                    ['GET', '/services?tag='.rawurlencode('shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16))] => [],
+                    ['GET', '/services?tag='.rawurlencode('shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16))] => [],
                     ['POST', '/services'] => ['uuid' => 'service-123', 'service_type' => 'actualbudget'],
                     default => [],
                 };
@@ -2311,7 +2311,7 @@ final class CoolifyProviderTest extends TestCase
 
     public function testCatalogServiceCannotBeConvertedToCustomComposeInPlace(): void
     {
-        $tag = 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16);
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
         $calls = [];
         $client = new CoolifyApiClient(
             'https://coolify.example.test',

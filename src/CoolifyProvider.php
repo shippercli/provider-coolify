@@ -4457,6 +4457,14 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             }
         }
 
+        if ($app === null) {
+            foreach ($this->list($client->request('GET', '/applications')) as $candidate) {
+                if (($candidate['name'] ?? null) === $name) {
+                    throw new \RuntimeException('Refusing to create a duplicate Coolify application: its name already exists without matching project/profile ownership tags. Review and migrate the existing application explicitly.');
+                }
+            }
+        }
+
         $sourceType = $this->sourceType($profile);
         $source = $this->repositoryUrl($project);
         $branch = \method_exists($profile, 'branch') ? (string) $profile->branch() : 'main';
@@ -6187,8 +6195,14 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                     return false;
                 }
                 foreach ($this->tagNames($database['tags'] ?? []) as $tag) {
-                    if ($tag === $resourceTag || \str_starts_with($tag, $resourceTag.'-pr-')) {
+                    if ($tag === $resourceTag) {
                         return true;
+                    }
+                    if (\str_starts_with($tag, $resourceTag.'-pr-')) {
+                        $id = \substr($tag, \strlen($resourceTag.'-pr-'));
+                        if (\ctype_digit($id) && (int) $id > 0) {
+                            return true;
+                        }
                     }
                 }
 
@@ -7139,12 +7153,17 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
     private function resourceTag(object $project, ?object $profile): string
     {
-        return 'shippercli-'.\substr(\hash('sha256', $this->projectName($project).'|'.($profile === null ? '*' : $this->profileName($profile))), 0, 16);
+        return 'shippercli-'.\substr(\hash('sha256', $this->encodedScope($project, $profile)), 0, 16);
     }
 
     private function projectProfileHash(object $project, ?object $profile): string
     {
-        return \substr(\hash('sha256', $this->projectName($project).'|'.($profile === null ? '' : $this->profileName($profile))), 0, 10);
+        return \substr(\hash('sha256', $this->encodedScope($project, $profile)), 0, 10);
+    }
+
+    private function encodedScope(object $project, ?object $profile): string
+    {
+        return \json_encode([$this->projectName($project), $profile === null ? null : $this->profileName($profile)], JSON_THROW_ON_ERROR);
     }
 
     private function projectName(object $project): string

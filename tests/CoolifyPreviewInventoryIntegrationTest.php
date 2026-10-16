@@ -45,7 +45,7 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
 
             return ['uuid' => 'app-uuid', 'name' => 'storefront', 'tags' => [
                 'shippercli-managed',
-                'shippercli-'.substr(hash('sha256', 'storefront|preview'), 0, 16),
+                'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'preview'], JSON_THROW_ON_ERROR)), 0, 16),
             ]];
         });
         $mcp = new CoolifyMcpClient('https://coolify.example.test', 'token', transport: static function (array $message): array {
@@ -158,7 +158,7 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
                 return $this->config()[$key] ?? $default;
             }
         };
-        $resourceTag = 'shippercli-'.\substr(\hash('sha256', 'storefront|preview'), 0, 16);
+        $resourceTag = 'shippercli-'.\substr(\hash('sha256', json_encode(['storefront', 'preview'], JSON_THROW_ON_ERROR)), 0, 16);
         $previewTag = $resourceTag.'-pr-43';
         $apiCalls = [];
         $api = new CoolifyApiClient('https://coolify.example.test', 'token', transport: static function (string $method, string $path) use ($resourceTag, $previewTag, &$apiCalls): array {
@@ -238,7 +238,7 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
                 return $this->config()[$key] ?? $default;
             }
         };
-        $resourceTag = 'shippercli-'.\substr(\hash('sha256', 'storefront|preview'), 0, 16);
+        $resourceTag = 'shippercli-'.\substr(\hash('sha256', json_encode(['storefront', 'preview'], JSON_THROW_ON_ERROR)), 0, 16);
         $previewTag = $resourceTag.'-pr-43';
         $apiCalls = [];
         $api = new CoolifyApiClient('https://coolify.example.test', 'token', transport: static function (string $method, string $path) use ($previewTag, &$apiCalls): array {
