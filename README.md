@@ -537,3 +537,20 @@ independent read-back proof that Coolify persisted every requested setting. The
 POST can already have created a resource before an invalid response is detected;
 follow-up operations stop and account review may be required. Concurrent creations,
 other API surfaces and live runtime verification remain unfinished.
+
+### Inventory envelopes and completeness indicators
+
+REST inventory parsing supports a flat list or one unambiguous `data`/`items`
+wrapper. Explicit null data is not replaced by a second field. Failed/error
+wrappers are refused. Recognized continuation indicators (`next`,
+`next_page_url`, `next_cursor`, `has_more`), partial page metadata and totals that
+disagree with returned rows stop the operation. Complete one-page metadata and
+terminal continuation markers remain accepted. Continuation URLs are never
+requested by this parser. Supporting a future paginated endpoint requires its
+own documented traversal before its result can authorize reconciliation.
+
+These guards cover recognized metadata in the root, `meta`, `links`,
+`pagination`, and `_pagination` maps. They are not general support for arbitrary
+response envelopes or pagination protocols. Coolify's documented application
+list is a flat all-applications response; live/version-specific schema checks
+remain required. Error diagnostics do not include the continuation URL/payload.

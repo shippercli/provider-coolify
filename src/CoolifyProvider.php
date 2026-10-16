@@ -7552,7 +7552,52 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return array<int, array<string, mixed>> */
     private function list(array $response): array
     {
-        $items = $response['data'] ?? $response['items'] ?? $response;
+        if (\array_is_list($response)) {
+            $items = $response;
+        } else {
+            $hasData = \array_key_exists('data', $response);
+            $hasItems = \array_key_exists('items', $response);
+            if ($hasData === $hasItems) {
+                throw new \RuntimeException('Coolify returned an invalid resource inventory envelope (ambiguous).');
+            }
+            $items = $hasData ? $response['data'] : $response['items'];
+            if (\array_key_exists('success', $response) && $response['success'] !== true) {
+                throw new \RuntimeException('Coolify returned a failed resource inventory envelope.');
+            }
+            foreach (['error', 'errors'] as $field) {
+                if (\array_key_exists($field, $response) && ! \in_array($response[$field], [null, [], ''], true)) {
+                    throw new \RuntimeException('Coolify returned errors in a resource inventory envelope.');
+                }
+            }
+            $metadata = [$response];
+            foreach (['meta', 'links', '_pagination', 'pagination'] as $field) {
+                if (\array_key_exists($field, $response)) {
+                    if (! \is_array($response[$field]) || ($response[$field] !== [] && \array_is_list($response[$field]))) {
+                        throw new \RuntimeException('Coolify returned unreadable resource inventory metadata.');
+                    }
+                    $metadata[] = $response[$field];
+                }
+            }
+            foreach ($metadata as $meta) {
+                foreach (['next', 'next_page_url', 'next_cursor'] as $field) {
+                    if (\array_key_exists($field, $meta) && $meta[$field] !== null && $meta[$field] !== '') {
+                        throw new \RuntimeException('Coolify returned an incomplete resource inventory; continuation is not supported here.');
+                    }
+                }
+                if (\array_key_exists('has_more', $meta) && $meta['has_more'] !== false) {
+                    throw new \RuntimeException('Coolify returned an incomplete resource inventory.');
+                }
+                if (\array_key_exists('current_page', $meta) || \array_key_exists('last_page', $meta)) {
+                    if (($meta['current_page'] ?? null) !== 1 || ($meta['last_page'] ?? null) !== 1) {
+                        throw new \RuntimeException('Coolify returned a partial-page resource inventory.');
+                    }
+                }
+                if (\array_key_exists('total', $meta)
+                    && (! \is_int($meta['total']) || ! \is_array($items) || $meta['total'] !== \count($items))) {
+                    throw new \RuntimeException('Coolify resource inventory total does not match the returned rows.');
+                }
+            }
+        }
         if (! \is_array($items) || ! \array_is_list($items)) {
             throw new \RuntimeException('Coolify returned an invalid resource inventory.');
         }
