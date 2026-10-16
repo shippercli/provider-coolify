@@ -5928,20 +5928,25 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $config[$key] = $credentialOverrides[$field];
             }
         }
+        $explicitEmptyPassword = $passwordKey !== null
+            && \array_key_exists($passwordKey, $credentialOverrides)
+            && $credentialOverrides[$passwordKey] === '';
         if ($type === 'sqlite') {
             $environment['DB_CONNECTION'] ??= 'sqlite';
             $environment['DB_DATABASE'] ??= '/var/www/html/database/'.$name.'.sqlite';
         } elseif (($type === 'mysql' || $type === 'mariadb' || $type === 'postgres') && ! \array_key_exists('DB_CONNECTION', $environment)) {
             $environment['DB_CONNECTION'] = ($type === 'postgres' ? 'pgsql' : 'mysql');
             foreach (['host' => 'DB_HOST', 'port' => 'DB_PORT', 'database' => 'DB_DATABASE', 'username' => 'DB_USERNAME', 'password' => 'DB_PASSWORD'] as $key => $variable) {
-                if (! \array_key_exists($variable, $environment) && \is_string($config[$key] ?? null) && $config[$key] !== '') {
+                if (! \array_key_exists($variable, $environment) && \is_string($config[$key] ?? null)
+                    && ($config[$key] !== '' || ($key === 'password' && $explicitEmptyPassword))) {
                     $environment[$variable] = $config[$key];
                 }
             }
         }
         $prefix = 'SHIPPER_DB_'.\strtoupper(\preg_replace('/[^A-Za-z0-9]+/', '_', $name) ?? $name).'_';
         foreach (['host' => 'HOST', 'port' => 'PORT', 'database' => 'DATABASE', 'username' => 'USERNAME', 'password' => 'PASSWORD'] as $key => $suffix) {
-            if (! \array_key_exists($prefix.$suffix, $environment) && \is_string($config[$key] ?? null) && $config[$key] !== '') {
+            if (! \array_key_exists($prefix.$suffix, $environment) && \is_string($config[$key] ?? null)
+                && ($config[$key] !== '' || ($key === 'password' && $explicitEmptyPassword))) {
                 $environment[$prefix.$suffix] = $config[$key];
             }
         }

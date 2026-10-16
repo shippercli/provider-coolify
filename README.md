@@ -624,3 +624,8 @@ Duplicate names within the profile database list/map are rejected before merging
 with project declarations. This prevents a later profile entry from silently
 replacing an earlier engine or credential choice. Validation reports the error;
 planning blocks and database reconciliation stops before any API request.
+
+An explicitly configured empty password in `database_options` remains a known
+empty value in generated default/namespaced application variables. It is not
+silently dropped after the database update. Missing or redacted API credentials
+still require explicit application configuration; they are not inferred empty.

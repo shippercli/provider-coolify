@@ -50,7 +50,7 @@ final class DatabaseCredentialPreservationTest extends TestCase
             });
         $environment = (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider,
             $client, $project, $profile, 'project-1', 'environment-1', 'production', 'server-1');
-        return [$calls, $environment];
+        return [$calls, $environment, $project, $profile];
     }
 
     public function testOrdinaryDeclarationCredentialsDoNotUpdateExistingDatabases(): void
@@ -122,4 +122,29 @@ final class DatabaseCredentialPreservationTest extends TestCase
         self::assertSame('existing_database', $environment['DB_DATABASE']);
         self::assertSame('explicit-secret', $environment['DB_PASSWORD']);
     }
+    public function testExplicitEmptyPasswordUpdateIsDeliveredAsKnownEmpty(): void
+    {
+        [$calls, $environment, $project, $profile] = $this->applyExisting('mysql', ['mysql_password' => '']);
+        $updates = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'PATCH'));
+        self::assertSame([['PATCH', '/databases/database-1', ['mysql_password' => '']]], $updates);
+        self::assertArrayHasKey('DB_PASSWORD', $environment);
+        self::assertSame('', $environment['DB_PASSWORD']);
+        self::assertArrayHasKey('SHIPPER_DB_MAIN_PASSWORD', $environment);
+        self::assertSame('', $environment['SHIPPER_DB_MAIN_PASSWORD']);
+        $applicationCalls = [];
+        $client = new CoolifyApiClient('https://example.test', 'synthetic', transport:
+            static function ($method, $path, $body) use (&$applicationCalls): array {
+                $applicationCalls[] = [$method, $path, $body];
+                return [];
+            });
+        (new \ReflectionMethod(new CoolifyProvider, 'applyEnvironment'))->invoke(new CoolifyProvider,
+            $client, 'app', $project, $profile, $environment);
+        $passwordWrites = array_values(array_filter($applicationCalls, static fn (array $call): bool =>
+            $call[0] === 'POST' && $call[1] === '/applications/app/envs'
+            && in_array($call[2]['key'] ?? null, ['DB_PASSWORD', 'SHIPPER_DB_MAIN_PASSWORD'], true)));
+        self::assertCount(2, $passwordWrites);
+        foreach ($passwordWrites as $call) self::assertSame('', $call[2]['value']);
+
+    }
+
 }
