@@ -179,4 +179,53 @@ final class DatabaseConnectionCompletenessTest extends TestCase
         }
     }
 
+    public function testNonSqlPreviewsCannotBorrowProductionSecrets(): void
+    {
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $production = ['SHIPPER_DB_MAIN_PR_42_PASSWORD' => 'production-secret'];
+            $project = new class($production) {
+                public function __construct(private array $values) {}
+                public function environment(): object { return new class($this->values) {
+                    public function __construct(private array $values) {}
+                    public function variables(): array { return $this->values; }
+                }; }
+            };
+            $calls = [];
+            $client = new CoolifyApiClient('https://example.test', 'synthetic', transport: function ($method, $path, $body) use (&$calls): array {
+                $calls[] = [$method, $path, $body]; return [];
+            });
+            $explicit = ['SHIPPER_DB_MAIN_PR_42_HOST' => 'preview.internal', 'SHIPPER_DB_MAIN_PR_42_USERNAME' => 'preview-user'];
+            $provider = new CoolifyProvider;
+            $failure = null;
+            try {
+                (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', $project,
+                    $this->profile($explicit, [['name' => 'main', 'type' => $type]], true), []);
+            } catch (\RuntimeException $exception) { $failure = $exception; }
+            self::assertInstanceOf(\RuntimeException::class, $failure);
+            self::assertStringContainsString('SHIPPER_DB_MAIN_PR_42_PASSWORD', $failure->getMessage());
+            self::assertSame([], $calls);
+        }
+    }
+
+    public function testNonSqlPreviewValuesAreWrittenOnlyToPreviewScope(): void
+    {
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $calls = [];
+            $client = new CoolifyApiClient('https://example.test', 'synthetic', transport: function ($method, $path, $body) use (&$calls): array {
+                $calls[] = [$method, $path, $body]; return [];
+            });
+            $values = ['SHIPPER_DB_MAIN_PR_42_HOST' => 'preview.internal', 'SHIPPER_DB_MAIN_PR_42_PASSWORD' => 'preview-only'];
+            if (\in_array($type, ['mongodb', 'clickhouse'], true)) $values['SHIPPER_DB_MAIN_PR_42_USERNAME'] = 'preview-user';
+            $provider = new CoolifyProvider;
+            (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', new \stdClass,
+                $this->profile($values, [['name' => 'main', 'type' => $type]], true), []);
+            $writes = \array_values(\array_filter($calls, fn ($call) => $call[0] === 'POST'));
+            self::assertCount(\count($values), $writes);
+            foreach ($writes as $write) {
+                self::assertTrue($write[2]['is_preview']);
+                self::assertSame($values[$write[2]['key']], $write[2]['value']);
+            }
+        }
+    }
+
 }

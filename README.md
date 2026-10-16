@@ -659,3 +659,10 @@ engine-specific client configuration still require application and live
 verification. A failure can occur after earlier resource operations; deployment
 is not transactional. MongoDB connection formats are described at
 https://www.mongodb.com/docs/manual/reference/connection-string/.
+
+Non-SQL preview delivery is covered separately: production project/profile
+variables cannot fill missing preview secrets, and the PR-specific namespaced
+variables are written only with `is_preview: true`. Explicit production values
+are not copied into preview requests. The HTTP fixture covers all five engines;
+a negative control enabling production fallback fails the fixture. This verifies
+request scope using synthetic data, not isolation inside a live database server.

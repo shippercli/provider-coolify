@@ -33,7 +33,7 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-nosql-environment.php')),
                     f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(len(calls), 17)
+                self.assertEqual(len(calls), 34)
                 self.assertTrue(all(auth == 'Bearer synthetic-nosql-token' for _, _, auth, _ in calls))
                 for engine in ['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse']:
                     path = '/api/v1/applications/' + engine + '/envs'
@@ -45,6 +45,16 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                     self.assertEqual({row['key']: row['value'] for row in rows}, expected)
                     self.assertEqual(len(rows), len(expected))
                     self.assertTrue(all(row['is_preview'] is False for row in rows))
+                    preview_path = '/api/v1/applications/' + engine + '-preview/envs'
+                    scoped = [call for call in calls if call[1] == preview_path]
+                    self.assertEqual(sum(method == 'GET' for method, _, _, _ in scoped), 1)
+                    rows = [json.loads(body) for method, _, _, body in scoped if method == 'POST']
+                    expected = {'SHIPPER_DB_MAIN_PR_42_HOST': 'preview.internal', 'SHIPPER_DB_MAIN_PR_42_PASSWORD': 'preview-only'}
+                    if engine in ['mongodb', 'clickhouse']: expected['SHIPPER_DB_MAIN_PR_42_USERNAME'] = 'preview-user'
+                    self.assertEqual({row['key']: row['value'] for row in rows}, expected)
+                    self.assertEqual(len(rows), len(expected))
+                    self.assertTrue(all(row['is_preview'] is True for row in rows))
+                self.assertTrue(all(b'production-secret' not in body for _, _, _, body in calls))
             finally:
                 server.shutdown()
 
