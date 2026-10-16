@@ -974,7 +974,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $client = $this->getClient();
             $tag = $this->resourceTag($project, $profile);
             $ownedDatabases = $this->ownedDatabasesForProfile($client, $tag);
-            $apps = $this->validateCleanupApplications($this->list($client->request('GET', '/applications')), $tag);
+            $apps = $this->validateApplicationInventory($this->list($client->request('GET', '/applications')), $tag);
             $services = $this->ownedServices($client, $tag);
             $serviceUuids = [];
             foreach ($services as $service) {
@@ -2155,6 +2155,14 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 throw new \RuntimeException('The Shipper-managed Coolify application was not found or is not owned.');
             }
             if ($app !== null) {
+                $app = $this->validateApplicationInventory([$app], $this->resourceTag($project, $profile))[0];
+                $configured = $this->profileOption($profile, 'application_uuid', $this->stringConfig('application_uuid'));
+                if ($configured !== '' && $this->resourceUuid($app) !== $configured) {
+                    throw new \RuntimeException('Coolify preview parent identity does not match the requested application.');
+                }
+            }
+            $workers = $this->ownedApplications($client, $project, $profile, $previewTag);
+            if ($app !== null) {
                 $uuid = $this->resourceUuid($app);
                 try {
                     $client->request('DELETE', '/applications/'.\rawurlencode($uuid).'/previews/'.$pullRequestId);
@@ -2164,12 +2172,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                     }
                 }
             }
-            foreach ($this->ownedApplications($client, $project, $profile, $previewTag) as $worker) {
+            foreach ($workers as $worker) {
                 $workerUuid = $this->resourceUuid($worker);
                 $workerName = $worker['name'] ?? '';
                 $workerPrefix = $this->workerResourceName($project, $profile, (string) $pullRequestId);
                 if ($workerUuid !== '' && \is_string($workerName)
-                    && \str_starts_with($workerName, $workerPrefix.'-')
+                    && (\str_starts_with($workerName, $workerPrefix.'-queue-')
+                        || \str_starts_with($workerName, $workerPrefix.'-daemon-'))
                     && ($worker['name'] ?? '') !== $this->resourceName($project, $profile)) {
                     $client->request('DELETE', '/applications/'.\rawurlencode($workerUuid));
                 }
@@ -6298,7 +6307,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @param array<int, array<string, mixed>> $inventory
      *  @return array<int, array<string, mixed>>
      */
-    private function validateCleanupApplications(array $inventory, string $scope): array
+    private function validateApplicationInventory(array $inventory, string $scope): array
     {
         $seen = [];
         $names = [];
@@ -6308,19 +6317,19 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $rawTags = $app['tags'] ?? [];
             if (! \is_string($uuid) || $uuid === '' || $uuid !== \trim($uuid) || isset($seen[$uuid])
                 || ! \is_string($name) || \trim($name) === '' || ! \is_array($rawTags) || ! \array_is_list($rawTags)) {
-                throw new \RuntimeException('Coolify application cleanup inventory has invalid or duplicate identities.');
+                throw new \RuntimeException('Coolify application inventory has invalid or duplicate identities.');
             }
             $seen[$uuid] = true;
             $tags = [];
             foreach ($rawTags as $tag) {
                 if (\is_array($tag)) {
                     if (isset($tag['name'], $tag['tag']) && $tag['name'] !== $tag['tag']) {
-                        throw new \RuntimeException('Coolify application cleanup inventory has ambiguous tags.');
+                        throw new \RuntimeException('Coolify application inventory has ambiguous tags.');
                     }
                     $tag = $tag['name'] ?? $tag['tag'] ?? null;
                 }
                 if (! \is_string($tag) || $tag === '') {
-                    throw new \RuntimeException('Coolify application cleanup inventory has unreadable tags.');
+                    throw new \RuntimeException('Coolify application inventory has unreadable tags.');
                 }
                 $tags[] = $tag;
             }
@@ -6333,7 +6342,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $allOwners = \array_filter($tags, static fn (string $tag): bool =>
                 \preg_match('/\Ashippercli-[a-f0-9]{16}(?:-pr-[1-9][0-9]*)?\z/', $tag) === 1);
             if (\count($owned) !== 1 || \count($allOwners) !== 1 || isset($names[$owned[0]."\0".$name])) {
-                throw new \RuntimeException('Coolify application cleanup inventory has ambiguous ownership or names.');
+                throw new \RuntimeException('Coolify application inventory has ambiguous ownership or names.');
             }
             $names[$owned[0]."\0".$name] = true;
         }
@@ -6346,7 +6355,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $tag ??= $this->resourceTag($project, $profile);
 
         return \array_values(\array_filter(
-            $this->list($client->request('GET', '/applications?tag='.\rawurlencode($tag))),
+            $this->validateApplicationInventory($this->list($client->request('GET', '/applications?tag='.\rawurlencode($tag))), $this->resourceTag($project, $profile)),
             fn (array $app): bool => $this->hasTag($app, $tag) && $this->hasTag($app, self::MARKER),
         ));
     }

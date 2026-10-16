@@ -451,6 +451,15 @@ preview-worker cleanup. Preview IDs must fit a positive integer.
 Database and selected service inventories are read before these application
 deletions; unavailable services or invalid selected service identities stop the
 operation first. API operations remain non-transactional, and a later deletion
-failure can still leave partial cleanup. This does not yet extend application
-inventory validation to every preview, apply, status or log lookup, or validate
-all service ownership metadata. Those paths remain under review.
+failure can still leave partial cleanup. Application creation/update lookups and explicit-ID reads outside preview cleanup
+remain under review, as does complete service ownership metadata validation.
+
+Preview cleanup now validates its parent identity and the complete returned worker
+inventory before deleting the preview endpoint. An explicit parent UUID must match
+the returned identity. Standalone deletion is limited to exact-scope queue and
+daemon worker prefixes; preview applications, other application types sharing the
+prefix, and foreign tags are preserved. Unavailable or ambiguous worker data stops
+cleanup before any preview/worker/database deletion. Shared tagged-application
+queries now use the application inventory validator, including identity, tag and
+managed-name ambiguity checks. These checks do not prevent concurrent changes
+after preflight or make later API deletion failures transactional.
