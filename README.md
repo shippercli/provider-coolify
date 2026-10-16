@@ -503,3 +503,22 @@ This check occurs after the PATCH, which may already have changed the original
 resource. It prevents accepting an unexpected response identity for later
 operations; it is not transactional rollback or proof of the resource's runtime
 state. Create/database responses and other mutation surfaces remain under review.
+
+### Database response identity and optional detail access
+
+Database create responses must provide a valid identity not already present in
+the preflight inventory. Supplied top-level/nested UUIDs must agree. Existing and
+new database detail/update responses are checked before their values or later
+resource operations are used. Returned metadata must retain the exact database
+ownership tag. Destination-detail reads also reject a supplied mismatched UUID.
+
+Only an explicit API HTTP 403 permission refusal can preserve previously known
+database data during optional detail reads. Missing resources, server/transport
+failures, malformed identity or lost ownership do not use this fallback. The
+connection completeness checks still apply to retained known data. Creation or
+updates may already have occurred before response validation fails; recovery and
+live authentication remain unverified.
+
+Rejection tests also guard against treating PHPUnit assertion failures as expected
+runtime exceptions. This keeps a test's own failure from satisfying its exception
+check.

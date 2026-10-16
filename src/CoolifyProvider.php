@@ -5320,7 +5320,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $updateOptions = $providerOptions;
                 unset($updateOptions['instant_deploy'], $updateOptions['destination_uuid'], $updateOptions['migrate_volumes']);
                 if ($existingUuid !== '' && $updateOptions !== []) {
-                    $client->request('PATCH', '/databases/'.\rawurlencode($existingUuid), $updateOptions);
+                    $this->checkedDatabaseResponse($existing, $client->request('PATCH', '/databases/'.\rawurlencode($existingUuid), $updateOptions), $existingUuid, $scopeTag, $tag);
                 }
                 $existingTagNames = $this->tagNames($existing['tags'] ?? []);
                 $missingTags = \array_values(\array_diff($configuredTags, $existingTagNames));
@@ -5329,11 +5329,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 }
                 $details = $existing;
                 if ($existingUuid !== '') {
-                    try {
-                        $details = $client->request('GET', '/databases/'.\rawurlencode($existingUuid)) + $existing;
-                    } catch (\Throwable) {
-                        // Sensitive-read permissions are optional; preserve the known resource data.
-                    }
+                    $details = $this->optionalDatabaseDetails($client, $existing, $existingUuid, $scopeTag, $tag);
                 }
                 $details = \array_merge($details, $updateOptions);
                 if ($existingUuid !== '') {
@@ -5394,8 +5390,14 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 'keydb' => ['keydb_password' => $password],
             };
             $created = $client->request('POST', $endpoint, $payload);
-            $details = $created;
             $createdUuid = $this->resourceUuid($created);
+            if ($createdUuid === '' || $createdUuid !== \trim($createdUuid)
+                || \in_array($createdUuid, \array_column($inventory, 'uuid'), true)) {
+                throw new \RuntimeException('Coolify database creation response has an invalid or reused identity.');
+            }
+            $this->assertResponseIdentity($created, $createdUuid, 'database');
+            $created = $this->checkedDatabaseResponse($payload + ['uuid' => $createdUuid], $created, $createdUuid, $scopeTag, $tag);
+            $details = $created;
             if ($createdUuid !== '') {
                 $updateOptions = $providerOptions;
                 if ($type === 'mongodb') {
@@ -5403,13 +5405,9 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 }
                 unset($updateOptions['instant_deploy'], $updateOptions['destination_uuid'], $updateOptions['migrate_volumes']);
                 if ($updateOptions !== []) {
-                    $client->request('PATCH', '/databases/'.\rawurlencode($createdUuid), $updateOptions);
+                    $this->checkedDatabaseResponse($created, $client->request('PATCH', '/databases/'.\rawurlencode($createdUuid), $updateOptions), $createdUuid, $scopeTag, $tag);
                 }
-                try {
-                    $details = $client->request('GET', '/databases/'.\rawurlencode($createdUuid)) + $created;
-                } catch (\Throwable) {
-                    // Sensitive-read permissions are optional; retain the create response and generated secret.
-                }
+                $details = $this->optionalDatabaseDetails($client, $created, $createdUuid, $scopeTag, $tag);
                 $this->applyDatabaseBackupOptions($client, $createdUuid, $project, $profile, $database['name']);
                 $this->applyDatabaseStorages($client, $createdUuid, $project, $profile, $database['name']);
                 $this->applyDatabaseEnvironmentVariables($client, $createdUuid, $project, $profile, $database['name']);
@@ -6074,6 +6072,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $currentDestinationUuid = $resource['destination_uuid'] ?? ($resource['destination']['uuid'] ?? null);
         if (! \is_string($currentDestinationUuid) || $currentDestinationUuid === '') {
             $resource = $client->request('GET', '/'.$resourceType.'/'.\rawurlencode($resourceUuid));
+            $this->assertResponseIdentity($resource, $resourceUuid, 'resource placement');
             $currentDestinationUuid = $resource['destination_uuid'] ?? ($resource['destination']['uuid'] ?? null);
         }
         $currentServerUuid = $resource['server_uuid'] ?? null;
@@ -6431,11 +6430,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
     }
 
-    /** @param array<string, mixed> $known
-     *  @param array<string, mixed> $response
-     *  @return array<string, mixed>
-     */
-    private function checkedResourceUpdate(array $known, array $response, string $uuid, string $tag, string $kind): array
+    /** @param array<string, mixed> $response */
+    private function assertResponseIdentity(array $response, string $uuid, string $kind): void
     {
         $identities = [];
         if (\array_key_exists('uuid', $response)) $identities[] = $response['uuid'];
@@ -6444,9 +6440,50 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         foreach ($identities as $identity) {
             if (! \is_string($identity) || $identity !== $uuid) {
-                throw new \RuntimeException("Coolify {$kind} update response identity does not match the requested resource.");
+                throw new \RuntimeException("Coolify {$kind} response identity does not match the requested resource.");
             }
         }
+    }
+
+    /** @param array<string, mixed> $known
+     *  @param array<string, mixed> $response
+     *  @return array<string, mixed>
+     */
+    private function checkedDatabaseResponse(array $known, array $response, string $uuid, string $scope, string $tag): array
+    {
+        $this->assertResponseIdentity($response, $uuid, 'database');
+        $details = $this->validateDatabaseInventory([$response + $known], $scope)[0];
+        if (! $this->hasTag($details, $tag) || ! $this->hasTag($details, self::MARKER)) {
+            throw new \RuntimeException('Coolify database response ownership identity changed.');
+        }
+        return $details;
+    }
+
+    /** @param array<string, mixed> $known
+     *  @return array<string, mixed>
+     */
+    private function optionalDatabaseDetails(CoolifyApiClient $client, array $known, string $uuid, string $scope, string $tag): array
+    {
+        try {
+            $response = $client->request('GET', '/databases/'.\rawurlencode($uuid));
+        } catch (\Throwable $error) {
+            if (! $error instanceof \RuntimeException
+                || \preg_match('/\ACoolify API request failed \(HTTP 403\):/', $error->getMessage()) !== 1) {
+                throw $error;
+            }
+            // Only explicit permission refusal can preserve previously known data.
+            return $known;
+        }
+        return $this->checkedDatabaseResponse($known, $response, $uuid, $scope, $tag);
+    }
+
+    /** @param array<string, mixed> $known
+     *  @param array<string, mixed> $response
+     *  @return array<string, mixed>
+     */
+    private function checkedResourceUpdate(array $known, array $response, string $uuid, string $tag, string $kind): array
+    {
+        $this->assertResponseIdentity($response, $uuid, $kind);
         $updated = $this->validateScopedInventory([$response + $known], $tag, $kind)[0];
         if (! $this->hasTag($updated, $tag) || ! $this->hasTag($updated, self::MARKER)) {
             throw new \RuntimeException("Coolify {$kind} update response no longer has the expected scope ownership.");
