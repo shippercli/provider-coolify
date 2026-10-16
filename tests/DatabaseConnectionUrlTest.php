@@ -91,4 +91,51 @@ final class DatabaseConnectionUrlTest extends TestCase
         self::assertSame('Coolify returned an invalid database connection URL.', $failure->getMessage());
     }
 
+    public function testPostgresNamedParametersOverrideHierarchicalComponents(): void
+    {
+        $environment = [];
+        $url = 'postgresql://old:old-secret@old.internal:5432/old?host=query.internal&port=5440&user=query-user&password=query%2Bsecret&dbname=querydb&sslmode=require';
+        $args = [&$environment, 'postgres', 'main', ['internal_db_url' => $url], null, null];
+        $provider = new CoolifyProvider;
+        (new \ReflectionMethod($provider, 'mergeDatabaseEnvironment'))->invokeArgs($provider, $args);
+        foreach (['HOST' => 'query.internal', 'PORT' => '5440', 'USERNAME' => 'query-user', 'PASSWORD' => 'query+secret', 'DATABASE' => 'querydb'] as $key => $value) {
+            self::assertSame($value, $environment['DB_'.$key]);
+        }
+    }
+
+    public function testPostgresCredentialUpdatesReplaceQueryCredentialsToo(): void
+    {
+        $environment = [];
+        $url = 'postgresql://old:old-secret@db.internal:5432/old?user=query-user&password=query-secret&dbname=querydb&sslmode=require&application_name=literal+name';
+        $args = [&$environment, 'postgres', 'main', ['internal_db_url' => $url], null, null,
+            ['postgres_user' => 'new-user', 'postgres_password' => 'new+secret', 'postgres_db' => 'new db']];
+        $provider = new CoolifyProvider;
+        (new \ReflectionMethod($provider, 'mergeDatabaseEnvironment'))->invokeArgs($provider, $args);
+        self::assertSame('postgresql://new-user:new%2Bsecret@db.internal:5432/new%20db?user=new-user&password=new%2Bsecret&dbname=new%20db&sslmode=require&application_name=literal+name', $environment['SHIPPER_DB_MAIN_URL']);
+    }
+
+    public function testPostgresQueryHostDoesNotRequireAnAuthority(): void
+    {
+        $environment = [];
+        $args = [&$environment, 'postgres', 'main', ['internal_db_url' => 'postgresql:///main?host=db.internal&user=user&password=secret'], null, null];
+        $provider = new CoolifyProvider;
+        (new \ReflectionMethod($provider, 'mergeDatabaseEnvironment'))->invokeArgs($provider, $args);
+        self::assertSame('db.internal', $environment['DB_HOST']);
+        self::assertSame('main', $environment['DB_DATABASE']);
+        self::assertSame('secret', $environment['DB_PASSWORD']);
+        self::assertStringContainsString('?host=db.internal&user=user&password=secret', $environment['SHIPPER_DB_MAIN_URL']);
+    }
+
+    public function testRepeatedEncodedPostgresCredentialParametersCannotRetainOldSecrets(): void
+    {
+        $environment = [];
+        $args = [&$environment, 'postgres', 'main',
+            ['internal_db_url' => 'postgresql://user@db.internal/main?password=first-old&%70assword=second-old&application_name=literal+name'], null, null,
+            ['postgres_password' => 'new+secret']];
+        $provider = new CoolifyProvider;
+        (new \ReflectionMethod($provider, 'mergeDatabaseEnvironment'))->invokeArgs($provider, $args);
+        self::assertSame('postgresql://user:new%2Bsecret@db.internal/main?password=new%2Bsecret&%70assword=new%2Bsecret&application_name=literal+name', $environment['SHIPPER_DB_MAIN_URL']);
+        self::assertSame('new+secret', $environment['DB_PASSWORD']);
+    }
+
 }

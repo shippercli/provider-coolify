@@ -76,3 +76,14 @@ $urlProfile = new class {
 };
 $apply->invoke($provider, $client, 'mongodb-url', new stdClass, $urlProfile, $environment);
 echo "Full MongoDB URL with updated credentials delivered to application environment\n";
+
+$pgEnvironment = [];
+$pgArgs = [&$pgEnvironment, 'postgres', 'main', ['internal_db_url' => 'postgresql://old:old-secret@db.internal:5432/old?user=query-user&password=query-secret&dbname=querydb&sslmode=require'], null, null,
+    ['postgres_user' => 'new-user', 'postgres_password' => 'new+secret', 'postgres_db' => 'new db']];
+(new ReflectionMethod($provider, 'mergeDatabaseEnvironment'))->invokeArgs($provider, $pgArgs);
+$pgProfile = new class {
+    public function name(): string { return 'production'; }
+    public function config(): array { return ['coolify' => ['databases' => [['name' => 'main', 'type' => 'postgresql']]]]; }
+};
+$apply->invoke($provider, $client, 'postgres-query', new stdClass, $pgProfile, $pgEnvironment);
+echo "PostgreSQL query credentials updated consistently before application delivery\n";

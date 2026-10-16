@@ -5915,6 +5915,11 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $config = [];
         if (\is_string($url) && $url !== '') {
             $parts = \parse_url($url);
+            if (! \is_array($parts) && $type === 'postgres'
+                && \preg_match('~\A([A-Za-z][A-Za-z0-9+.-]*://)([^/?#]*)([^?#]*)(.*)\z~D', $url, $rawParts) === 1
+                && $rawParts[2] === '') {
+                $parts = ['path' => $rawParts[3]];
+            }
             if (\is_array($parts)) {
                 $config = [
                     'host' => $parts['host'] ?? null,
@@ -5924,6 +5929,9 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                     'password' => isset($parts['pass']) ? \rawurldecode($parts['pass']) : null,
                 ];
             }
+        }
+        if ($type === 'postgres' && \is_string($url) && $url !== '') {
+            $config = \array_merge($config, $this->postgresConnectionParameters($url));
         }
         $credentialKeys = match ($type) {
             'mysql' => ['mysql_user', 'mysql_password', 'mysql_database'],
@@ -5971,7 +5979,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         $prefix = 'SHIPPER_DB_'.\strtoupper(\preg_replace('/[^A-Za-z0-9]+/', '_', $name) ?? $name).'_';
         if ($type !== 'sqlite' && \is_string($url) && $url !== '' && ! \array_key_exists($prefix.'URL', $environment)) {
-            $environment[$prefix.'URL'] = $this->applicationDatabaseUrl($url, $config, $databaseKey, $credentialOverrides);
+            $environment[$prefix.'URL'] = $this->applicationDatabaseUrl($url, $config, $databaseKey, $credentialOverrides, $type);
         }
         foreach (['host' => 'HOST', 'port' => 'PORT', 'database' => 'DATABASE', 'username' => 'USERNAME', 'password' => 'PASSWORD'] as $key => $suffix) {
             if (! \array_key_exists($prefix.$suffix, $environment) && \is_string($config[$key] ?? null)
@@ -5981,17 +5989,32 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
     }
 
-    /** @param array<string, mixed> $config @param array<string, mixed> $overrides */
-    private function applicationDatabaseUrl(string $url, array $config, ?string $databaseKey, array $overrides): string
+    /** @return array<string, string> */
+    private function postgresConnectionParameters(string $url): array
     {
-        if (\preg_match('~\A([A-Za-z][A-Za-z0-9+.-]*://)([^/?#]+)([^?#]*)(.*)\z~D', $url, $parts) !== 1) {
+        $question = \strpos($url, '?');
+        if ($question === false) return [];
+        $query = \explode('#', \substr($url, $question + 1), 2)[0];
+        $values = [];
+        foreach (\explode('&', $query) as $pair) {
+            [$key, $value] = \array_pad(\explode('=', $pair, 2), 2, '');
+            $field = ['host' => 'host', 'port' => 'port', 'user' => 'username', 'password' => 'password', 'dbname' => 'database'][\rawurldecode($key)] ?? null;
+            if ($field !== null) $values[$field] = \rawurldecode($value);
+        }
+        return $values;
+    }
+
+    /** @param array<string, mixed> $config @param array<string, mixed> $overrides */
+    private function applicationDatabaseUrl(string $url, array $config, ?string $databaseKey, array $overrides, string $type): string
+    {
+        if (\preg_match('~\A([A-Za-z][A-Za-z0-9+.-]*://)([^/?#]*)([^?#]*)(.*)\z~D', $url, $parts) !== 1) {
             throw new \RuntimeException('Coolify returned an invalid database connection URL.');
         }
         $authority = $parts[2];
         $at = \strrpos($authority, '@');
         $userinfo = $at === false ? null : \substr($authority, 0, $at);
         $hosts = $at === false ? $authority : \substr($authority, $at + 1);
-        if ($hosts === '') throw new \RuntimeException('Coolify returned an invalid database connection URL.');
+        if ($hosts === '' && $type !== 'postgres') throw new \RuntimeException('Coolify returned an invalid database connection URL.');
         if (\is_string($config['username'] ?? null) || \is_string($config['password'] ?? null)) {
             $existing = $userinfo === null ? [] : \explode(':', $userinfo, 2);
             $username = \is_string($config['username'] ?? null) ? \rawurlencode($config['username']) : ($existing[0] ?? '');
@@ -6002,7 +6025,21 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         if ($databaseKey !== null && \array_key_exists($databaseKey, $overrides) && \is_string($overrides[$databaseKey])) {
             $path = '/'.\rawurlencode($overrides[$databaseKey]);
         }
-        return $parts[1].($userinfo === null ? '' : $userinfo.'@').$hosts.$path.$parts[4];
+        $tail = $parts[4];
+        if ($type === 'postgres' && \str_starts_with($tail, '?')) {
+            [$query, $fragment] = \array_pad(\explode('#', \substr($tail, 1), 2), 2, null);
+            $pairs = \explode('&', $query);
+            foreach ($pairs as &$pair) {
+                [$key] = \explode('=', $pair, 2);
+                $field = ['user' => 'username', 'password' => 'password', 'dbname' => 'database'][\rawurldecode($key)] ?? null;
+                if ($field !== null && \is_string($config[$field] ?? null)) {
+                    $pair = $key.'='.\rawurlencode($config[$field]);
+                }
+            }
+            unset($pair);
+            $tail = '?'.\implode('&', $pairs).($fragment === null ? '' : '#'.$fragment);
+        }
+        return $parts[1].($userinfo === null ? '' : $userinfo.'@').$hosts.$path.$tail;
     }
 
     private function scheduledTasksPath(string $resourceType, string $resourceUuid): string

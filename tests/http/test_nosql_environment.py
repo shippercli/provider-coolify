@@ -33,7 +33,7 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-nosql-environment.php')),
                     f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(len(calls), 41)
+                self.assertEqual(len(calls), 54)
                 self.assertTrue(all(auth == 'Bearer synthetic-nosql-token' for _, _, auth, _ in calls))
                 for engine in ['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse']:
                     path = '/api/v1/applications/' + engine + '/envs'
@@ -65,6 +65,16 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 self.assertEqual(fields['SHIPPER_DB_MAIN_URL'], expected_url)
                 self.assertEqual(fields['SHIPPER_DB_MAIN_PASSWORD'], 'updated:@secret')
                 self.assertTrue(all(b'old-secret' not in body for _, _, _, body in calls))
+                pg_calls = [call for call in calls if call[1] == '/api/v1/applications/postgres-query/envs']
+                self.assertEqual(sum(method == 'GET' for method, _, _, _ in pg_calls), 1)
+                rows = [json.loads(body) for method, _, _, body in pg_calls if method == 'POST']
+                self.assertEqual(len(rows), 12)
+                self.assertTrue(all(row['is_preview'] is False for row in rows))
+                fields = {row['key']: row['value'] for row in rows}
+                self.assertEqual(fields['SHIPPER_DB_MAIN_URL'], 'postgresql://new-user:new%2Bsecret@db.internal:5432/new%20db?user=new-user&password=new%2Bsecret&dbname=new%20db&sslmode=require')
+                self.assertEqual(fields['DB_PASSWORD'], 'new+secret')
+                self.assertEqual(fields['DB_DATABASE'], 'new db')
+                self.assertTrue(all(b'query-secret' not in body for _, _, _, body in calls))
             finally:
                 server.shutdown()
 

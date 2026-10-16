@@ -689,3 +689,16 @@ it does not automatically set a framework-specific default URL variable. Configu
 the application to consume it when options/topology matter. This preserves the
 reported connection description; driver compatibility, authentication and live
 connectivity remain unverified.
+
+PostgreSQL named URI parameters (`host`, `port`, `user`, `password`, `dbname`)
+are reflected in scalar connection values as well as the full URL. Known user,
+password and database updates replace all corresponding query occurrences,
+including percent-encoded keys, so stale query credentials cannot override the
+new userinfo/path. Other query options retain their original bytes; URI `+`
+characters are not treated as form-encoded spaces. PostgreSQL URLs with an empty
+authority and a query host are supported. Three generated URI cases were checked
+with the installed libpq parser without opening a database connection.
+
+Reference: https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING-URIS
+This covers the named fields above, not every libpq connection parameter or live
+authentication/TLS behavior.
