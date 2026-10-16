@@ -19,7 +19,12 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
                 calls.append((self.command, self.path, self.headers.get('Authorization'), body))
                 payload = b'[]' if self.command == 'GET' else b'{}'
-                if self.command == 'POST' and self.path == '/api/v1/databases/postgresql':
+                if self.command == 'GET' and self.path == '/api/v1/databases/literal-env/envs':
+                    payload = json.dumps([
+                        {'uuid': 'existing', 'key': 'PASSWORD', 'comment': 'Managed by ShipperCLI'},
+                        {'uuid': 'stale', 'key': 'OLD', 'comment': 'Managed by ShipperCLI'},
+                        {'uuid': 'unmanaged', 'key': 'OTHER', 'comment': 'Unmanaged'}]).encode()
+                elif self.command == 'POST' and self.path == '/api/v1/databases/postgresql':
                     payload = b'{"uuid":"literal-created"}'
                 elif self.command == 'GET' and self.path == '/api/v1/databases/literal-created':
                     payload = json.dumps({'uuid': 'literal-created', 'internal_db_host': 'db.internal',
@@ -33,6 +38,8 @@ class NonSqlEnvironmentTest(unittest.TestCase):
 
             do_GET = respond
             do_POST = respond
+            do_PATCH = respond
+            do_DELETE = respond
 
         with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
             threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -40,8 +47,8 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 result = subprocess.run(['php', str(Path(__file__).with_name('verify-nosql-environment.php')),
                     f'http://127.0.0.1:{server.server_port}'], capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(len(calls), 58)
-                self.assertEqual([row[:2] for row in calls[-4:]], [('GET', '/api/v1/databases'), ('POST', '/api/v1/databases/postgresql'), ('GET', '/api/v1/databases/literal-created'), ('GET', '/api/v1/databases/literal-created/envs')])
+                self.assertEqual(len(calls), 63)
+                self.assertEqual([row[:2] for row in calls if row[1] in ['/api/v1/databases', '/api/v1/databases/postgresql', '/api/v1/databases/literal-created', '/api/v1/databases/literal-created/envs']], [('GET', '/api/v1/databases'), ('POST', '/api/v1/databases/postgresql'), ('GET', '/api/v1/databases/literal-created'), ('GET', '/api/v1/databases/literal-created/envs')])
                 self.assertTrue(all(auth == 'Bearer synthetic-nosql-token' for _, _, auth, _ in calls))
                 for engine in ['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse']:
                     path = '/api/v1/applications/' + engine + '/envs'
@@ -86,6 +93,12 @@ class NonSqlEnvironmentTest(unittest.TestCase):
                 creates = [json.loads(body) for method, path, _, body in calls if method == 'POST' and path == '/api/v1/databases/postgresql']
                 self.assertEqual(len(creates), 1)
                 self.assertEqual(creates[0]['postgres_password'], 'literal-${PROJECT_NAME}-${PROFILE}-+%:@')
+                env_calls = [row for row in calls if row[1].startswith('/api/v1/databases/literal-env/envs')]
+                self.assertEqual(len(env_calls), 5)
+                self.assertEqual([(method, path) for method, path, _, _ in env_calls if method == 'DELETE'], [('DELETE', '/api/v1/databases/literal-env/envs/stale')])
+                writes = [(method, json.loads(body)) for method, _, _, body in env_calls if method in ['POST', 'PATCH']]
+                self.assertEqual([method for method, _ in writes], ['PATCH', 'POST', 'POST'])
+                self.assertEqual({row['key']: row['value'] for _, row in writes}, {'PASSWORD': 'literal-${PROJECT_NAME}-${PROFILE}-+%:@', 'TOKEN': 'literal-${PROJECT_NAME}-${PROFILE}-+%:@', 'EMPTY': ''})
             finally:
                 server.shutdown()
 

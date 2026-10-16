@@ -5762,11 +5762,6 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $desiredEnvironment = \is_array($allEnvironments) && \is_array($allEnvironments[$databaseName] ?? null)
             ? $allEnvironments[$databaseName]
             : [];
-        foreach ($desiredEnvironment as $key => $value) {
-            if (\is_string($value)) {
-                $desiredEnvironment[$key] = $this->interpolate($value, $project, $profile);
-            }
-        }
         $path = '/databases/'.\rawurlencode($databaseUuid).'/envs';
         $existingEnvironment = $this->list($client->requestInventory($path));
         $existingByKey = [];

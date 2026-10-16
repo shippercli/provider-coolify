@@ -38,6 +38,9 @@ projects:
           databases:
             main:
               password: '${SHIPPER_AUDIT_DB_SECRET}'
+          database_environment_variables:
+            main:
+              TOKEN: '${SHIPPER_AUDIT_DB_SECRET}'
 YAML);
 try {
     $project = (new ConfigLoader($path))->load()->getProject('storefront');
@@ -70,6 +73,10 @@ try {
     $create = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'POST' && $call[1] === '/databases/postgresql'));
     if (count($create) !== 1 || $create[0][2]['postgres_user'] !== 'reporter' || $create[0][2]['postgres_password'] !== $secret) {
         throw new RuntimeException('Real CLI database objects produced incorrect create payload');
+    }
+    $databaseWrites = array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'POST' && $call[1] === '/databases/created/envs'));
+    if (count($databaseWrites) !== 1 || $databaseWrites[0][2]['value'] !== $secret) {
+        throw new RuntimeException('Real CLI database environment secret changed before API delivery');
     }
     (new ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', $project, $profile, $databaseEnvironment);
     $delivered = [];

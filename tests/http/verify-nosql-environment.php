@@ -101,3 +101,13 @@ if (($literalEnvironment['DB_PASSWORD'] ?? null) !== $literal || ($literalEnviro
     throw new RuntimeException('Declared database password macros were expanded');
 }
 echo "Literal database creation password preserved across actual HTTP provisioning\n";
+
+$databaseEnvProfile = new class($literal) {
+    public function __construct(private string $secret) {}
+    public function name(): string { return 'production'; }
+    public function config(): array { return ['coolify' => ['database_environment_variables' => ['main' => [
+        'PASSWORD' => $this->secret, 'TOKEN' => $this->secret, 'EMPTY' => '',
+    ]]]]; }
+};
+(new ReflectionMethod($provider, 'applyDatabaseEnvironmentVariables'))->invoke($provider, $client, 'literal-env', $literalProject, $databaseEnvProfile, 'main');
+echo "Literal database environment values delivered on POST and PATCH with scoped cleanup\n";

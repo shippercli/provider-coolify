@@ -711,3 +711,10 @@ CLI PR #158 provides single-pass loading so injected secret contents are not
 expanded again inside profile options. This changes configurations that relied
 on provider macros inside passwords; supply the intended password explicitly
 through your secret/configuration workflow instead.
+
+Values in `database_environment_variables` are also literal at the provider
+boundary, matching application environment handling. Project/profile name macros
+are not expanded inside values that may contain secrets. Existing managed keys
+still update, new keys still create, explicitly empty strings are retained, and
+only stale variables marked as Shipper-managed are removed. Configurations that
+used provider macros in these values must supply their intended resolved values.
