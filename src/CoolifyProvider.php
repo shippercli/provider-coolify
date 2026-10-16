@@ -5230,7 +5230,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $applicationEnvironment = [];
         $baseTag = $this->resourceTag($project, $profile);
         $scopeTag = $this->pullRequestId($profile) !== '' ? $baseTag.'-pr-'.$this->pullRequestId($profile) : $baseTag;
-        $inventory = $this->list($client->request('GET', '/databases'));
+        $inventory = $this->validateDatabaseInventory($this->list($client->request('GET', '/databases')), $scopeTag);
         $wantedTags = [];
         foreach ($databases as $database) {
             $name = $this->databaseResourceName($database['name'], $project, $profile);
@@ -5409,6 +5409,55 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
 
         return $applicationEnvironment;
+    }
+
+    /** @param array<int, array<string, mixed>> $inventory
+     *  @return array<int, array<string, mixed>>
+     */
+    private function validateDatabaseInventory(array $inventory, string $scope): array
+    {
+        $identities = [];
+        $owners = [];
+        foreach ($inventory as $index => $database) {
+            $uuid = $database['uuid'] ?? null;
+            $name = $database['name'] ?? null;
+            if (! \is_string($uuid) || $uuid === '' || $uuid !== \trim($uuid)
+                || ! \is_string($name) || \trim($name) === '' || isset($identities[$uuid])) {
+                throw new \RuntimeException('Coolify database inventory has missing or duplicate resource identities.');
+            }
+            $identities[$uuid] = true;
+            $rawTags = $database['tags'] ?? [];
+            if (! \is_array($rawTags) || ! \array_is_list($rawTags)) {
+                throw new \RuntimeException('Coolify database inventory has unreadable tags.');
+            }
+            $tags = [];
+            foreach ($rawTags as $tag) {
+                if (\is_array($tag)) {
+                    if (isset($tag['name'], $tag['tag']) && $tag['name'] !== $tag['tag']) {
+                        throw new \RuntimeException('Coolify database inventory has ambiguous tag names.');
+                    }
+                    $tag = $tag['name'] ?? $tag['tag'] ?? null;
+                }
+                if (! \is_string($tag) || $tag === '') {
+                    throw new \RuntimeException('Coolify database inventory has unreadable tag names.');
+                }
+                $tags[] = $tag;
+            }
+            $database['tags'] = $tags;
+            $inventory[$index] = $database;
+            if (! $this->hasTag($database, self::MARKER) || ! $this->hasDatabaseScopeTag($database, $scope, false)) {
+                continue;
+            }
+            $ownershipTags = \array_values(\array_filter($tags, static fn (string $tag): bool =>
+                \preg_match('/\Ashippercli-[a-f0-9]{16}(?:-pr-[1-9][0-9]*)?(?:-db-[a-f0-9]{10})?\z/', $tag) === 1));
+            if (\count($ownershipTags) !== 1
+                || \preg_match('/\A'.\preg_quote($scope, '/').'-db-[a-f0-9]{10}\z/', $ownershipTags[0]) !== 1
+                || isset($owners[$ownershipTags[0]])) {
+                throw new \RuntimeException('Coolify database inventory has ambiguous or legacy ownership; review its resource tags.');
+            }
+            $owners[$ownershipTags[0]] = true;
+        }
+        return $inventory;
     }
 
     private function databaseResourceName(string $name, object $project, object $profile): string

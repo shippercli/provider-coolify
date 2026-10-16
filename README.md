@@ -415,3 +415,18 @@ Connection URL usernames, passwords and database paths are URL-decoded exactly
 once when converted to environment variables. Literal values returned in separate
 API fields are not URL-decoded. Plus signs remain plus signs; encoded percent
 characters are not decoded a second time.
+
+### Database inventory preflight during apply
+
+Before database reconciliation, apply validates the entire returned database
+inventory. Rows need unique non-empty UUIDs, readable names and tag lists. String
+tags and objects with `name` or `tag` are supported; conflicting tag names are
+rejected. Each database owned by the exact current scope must carry exactly one
+unambiguous per-database ownership tag. Multiple resources with that tag, multiple
+Shipper ownership tags on one resource, and legacy scope-only tags require review.
+
+This check runs before creating, moving, updating or deleting any database, so an
+ambiguous later declaration cannot permit earlier database changes. Application
+reconciliation may already have occurred. It does not authenticate manually
+editable tags, resolve concurrent changes, or extend this preflight to every plan
+and cleanup path; those remain under review.

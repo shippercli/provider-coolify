@@ -52,10 +52,10 @@ final class ApplicationOwnershipTest extends TestCase
         $client = new CoolifyApiClient('https://coolify.example.com', 'token', transport: static function (string $method, string $path, ?array $body) use (&$calls, $tag): array {
             $calls[] = [$method, $path];
             return $method === 'GET' ? [
-                ['uuid' => 'removed', 'tags' => ['shippercli-managed', $tag.'-db-0123456789']],
-                ['uuid' => 'preview', 'tags' => ['shippercli-managed', $tag.'-pr-42-db-0123456789']],
-                ['uuid' => 'unmanaged', 'tags' => [$tag.'-db-0123456789']],
-                ['uuid' => 'other', 'tags' => ['shippercli-managed', 'other-db-0123456789']],
+                ['uuid' => 'removed', 'name' => 'removed', 'tags' => ['shippercli-managed', $tag.'-db-0123456789']],
+                ['uuid' => 'preview', 'name' => 'preview', 'tags' => ['shippercli-managed', $tag.'-pr-42-db-0123456789']],
+                ['uuid' => 'unmanaged', 'name' => 'unmanaged', 'tags' => [$tag.'-db-0123456789']],
+                ['uuid' => 'other', 'name' => 'other', 'tags' => ['shippercli-managed', 'other-db-0123456789']],
             ] : [];
         });
         $provider = new CoolifyProvider([], $client);
