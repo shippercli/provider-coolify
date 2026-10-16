@@ -67,4 +67,15 @@ final class CoolifyApiClientTest extends TestCase
         self::assertSame(['GET', '/databases', null], $request);
     }
 
+    public function testTransportDiagnosticDoesNotExposeUrlCredentials(): void
+    {
+        $client = new CoolifyApiClient('http://synthetic-user:synthetic-url-password@127.0.0.1:bad-port', 'synthetic-token');
+        $failure = null;
+        try { $client->request('GET', '/test'); } catch (\RuntimeException $error) { $failure = $error; }
+        self::assertInstanceOf(\RuntimeException::class, $failure);
+        self::assertStringContainsString('Coolify API transport error:', $failure->getMessage());
+        self::assertStringNotContainsString('synthetic-url-password', $failure->getMessage());
+        self::assertStringNotContainsString('synthetic-token', $failure->getMessage());
+    }
+
 }

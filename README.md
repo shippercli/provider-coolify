@@ -571,3 +571,19 @@ shape guard disabled reproduces the empty-object acceptance. This test runs in
 CI alongside PHPUnit; it needs loopback socket access and contacts no live account.
 The generic untyped request method remains available for object/acknowledgement
 endpoints; callers must use the inventory path when completeness matters.
+
+### HTTP failure diagnostics
+
+JSON, text and multipart HTTP failures report status-based categories rather than
+server-provided message/error bodies, which can echo credentials or uploaded data.
+The HTTP status prefix is retained for existing 403/404 handling, and 429 errors
+retain a numeric Retry-After hint. Non-JSON error bodies still report their HTTP
+status. Transport errors use cURL error categories without raw cURL URL text.
+
+The local HTTP regression sends synthetic bearer credentials, a JSON password and
+multipart password/file data, confirms the server receives them intact, and checks
+that rejected-response diagnostics do not expose them. Successful response bodies
+and application log contents are unchanged. Field-level API error details are no
+longer included in these failure messages; inspect protected server diagnostics
+when that detail is needed. This covers client exception messages, not arbitrary
+application output or user-enabled engine traces.

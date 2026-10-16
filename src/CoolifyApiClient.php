@@ -90,6 +90,7 @@ final class CoolifyApiClient
             $options[CURLOPT_POSTFIELDS] = \json_encode($body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         }
         [$responseBody, $status, $retryAfter] = $this->executeRequest($method, $path, $options);
+        if ($status < 200 || $status >= 300) throw $this->httpFailure($status, $retryAfter);
         if ($responseBody === '') {
             $decoded = [];
         } else {
@@ -102,14 +103,7 @@ final class CoolifyApiClient
         if (! \is_array($decoded)) {
             throw new \RuntimeException('Coolify API returned an invalid response.');
         }
-        if ($status < 200 || $status >= 300) {
-            $message = $decoded['message'] ?? $decoded['error'] ?? ('HTTP '.$status);
-            if (\is_array($message)) {
-                $message = \json_encode($message, JSON_UNESCAPED_SLASHES) ?: 'request rejected';
-            }
-            $retryMessage = $status === 429 && $retryAfter !== null ? " Retry after {$retryAfter} seconds." : '';
-            throw new \RuntimeException("Coolify API request failed (HTTP {$status}): {$message}.{$retryMessage}");
-        }
+
 
         return $inventory ? $this->decodeInventory($responseBody) : $decoded;
     }
@@ -167,23 +161,7 @@ final class CoolifyApiClient
             CURLOPT_SSL_VERIFYPEER => $this->verifySsl,
             CURLOPT_SSL_VERIFYHOST => $this->verifySsl ? 2 : 0,
         ]);
-        if ($status < 200 || $status >= 300) {
-            $message = 'HTTP '.$status;
-            try {
-                $decoded = \json_decode($responseBody, true, 512, JSON_THROW_ON_ERROR);
-                if (\is_array($decoded)) {
-                    $message = $decoded['message'] ?? $decoded['error'] ?? $message;
-                    if (\is_array($message)) {
-                        $message = \json_encode($message, JSON_UNESCAPED_SLASHES) ?: 'request rejected';
-                    }
-                }
-            } catch (\JsonException) {
-                // Keep the status-based message for non-JSON errors.
-            }
-
-            $retryMessage = $status === 429 && $retryAfter !== null ? " Retry after {$retryAfter} seconds." : '';
-            throw new \RuntimeException("Coolify API request failed (HTTP {$status}): {$message}.{$retryMessage}");
-        }
+        if ($status < 200 || $status >= 300) throw $this->httpFailure($status, $retryAfter);
 
         return $responseBody;
     }
@@ -233,6 +211,7 @@ final class CoolifyApiClient
             CURLOPT_SSL_VERIFYPEER => $this->verifySsl,
             CURLOPT_SSL_VERIFYHOST => $this->verifySsl ? 2 : 0,
         ]);
+        if ($status < 200 || $status >= 300) throw $this->httpFailure($status, $retryAfter);
         try {
             $decoded = $responseBody === '' ? [] : \json_decode($responseBody, true, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException $exception) {
@@ -241,16 +220,25 @@ final class CoolifyApiClient
         if (! \is_array($decoded)) {
             throw new \RuntimeException('Coolify API returned an invalid response.');
         }
-        if ($status < 200 || $status >= 300) {
-            $message = $decoded['message'] ?? $decoded['error'] ?? ('HTTP '.$status);
-            if (\is_array($message)) {
-                $message = \json_encode($message, JSON_UNESCAPED_SLASHES) ?: 'request rejected';
-            }
-            $retryMessage = $status === 429 && $retryAfter !== null ? " Retry after {$retryAfter} seconds." : '';
-            throw new \RuntimeException("Coolify API request failed (HTTP {$status}): {$message}.{$retryMessage}");
-        }
+
 
         return $decoded;
+    }
+
+    private function httpFailure(int $status, ?int $retryAfter): \RuntimeException
+    {
+        $reason = match ($status) {
+            400 => 'bad request',
+            401 => 'unauthenticated',
+            403 => 'access denied',
+            404 => 'resource not found',
+            409 => 'resource conflict',
+            422 => 'validation failed',
+            429 => 'rate limit exceeded',
+            default => $status >= 500 ? 'server error' : 'request rejected',
+        };
+        $retry = $status === 429 && $retryAfter !== null ? " Retry after {$retryAfter} seconds." : '';
+        return new \RuntimeException("Coolify API request failed (HTTP {$status}): {$reason}.{$retry}");
     }
 
     /**
@@ -278,11 +266,19 @@ final class CoolifyApiClient
             \curl_setopt_array($handle, $attemptOptions);
             $responseBody = \curl_exec($handle);
             $status = (int) \curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-            $curlError = \curl_error($handle);
+            $curlErrno = \curl_errno($handle);
             \curl_close($handle);
 
             if ($responseBody === false) {
-                throw new \RuntimeException('Coolify API transport error: '.$curlError);
+                $reason = match ($curlErrno) {
+                    CURLE_OPERATION_TIMEDOUT => 'request timed out',
+                    CURLE_COULDNT_RESOLVE_HOST => 'host could not be resolved',
+                    CURLE_COULDNT_CONNECT => 'connection failed',
+                    CURLE_SSL_CONNECT_ERROR, CURLE_SSL_CACERT => 'TLS connection failed',
+                    CURLE_URL_MALFORMAT => 'invalid request URL',
+                    default => 'request failed',
+                };
+                throw new \RuntimeException('Coolify API transport error: '.$reason.'.');
             }
             if ($status !== 429 || ! $safeToRetry || $retryAfter === null || $attempt >= 2) {
                 return [$responseBody, $status, $retryAfter];
