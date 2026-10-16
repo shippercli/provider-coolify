@@ -8,12 +8,59 @@ use ShipperCli\ProviderCoolify\CoolifyProvider;
 
 final class ApplicationOwnershipTest extends TestCase
 {
+    public function testDatabaseSpecificPreviewTagsSupportListingAndCleanup(): void
+    {
+        $project = $this->named('api');
+        $profile = new class {
+            public function name(): string { return 'preview'; }
+            public function get(string $key, mixed $default = null): mixed { return $key === 'domain' ? '${GITHUB_PR_NUMBER}.preview.example.com' : $default; }
+            public function config(): array { return []; }
+        };
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['api', 'preview'], JSON_THROW_ON_ERROR)), 0, 16);
+        $database = ['uuid' => 'db-preview-42', 'tags' => ['shippercli-managed', $tag.'-pr-42-db-0123456789']];
+        $calls = [];
+        $client = new CoolifyApiClient('https://coolify.example.com', 'token', transport: static function (string $method, string $path, ?array $body) use (&$calls, $database, $tag): array {
+            $calls[] = [$method, $path];
+            if ($method === 'GET' && $path === '/databases') {
+                return [$database,
+                    ['uuid' => 'wrong-scope', 'tags' => ['shippercli-managed', 'other-pr-43-db-0123456789']],
+                    ['uuid' => 'unmanaged', 'tags' => [$tag.'-pr-44-db-0123456789']],
+                    ['uuid' => 'invalid', 'tags' => ['shippercli-managed', $tag.'-pr-45-db-invalid']],
+                    ['uuid' => 'overflow', 'tags' => ['shippercli-managed', $tag.'-pr-'.str_repeat('9', 30).'-db-0123456789']],
+                ];
+            }
+            return [];
+        });
+        $provider = new CoolifyProvider([], $client);
+        self::assertSame([['site_id' => -42, 'domain' => '42.preview.example.com']], $provider->listSites($project, $profile));
+        self::assertTrue($provider->deleteSiteWithDatabases($project, $profile, -42));
+        self::assertSame([['DELETE', '/databases/db-preview-42']], array_values(array_filter($calls, static fn (array $call): bool => $call[0] === 'DELETE')));
+    }
+
     private function named(string $name): object
     {
         return new class($name) {
             public function __construct(private string $value) {}
             public function name(): string { return $this->value; }
         };
+    }
+
+    public function testRemovedDatabaseDeclarationsReconcileOnlyTheExactOwnedScope(): void
+    {
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['api', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
+        $calls = [];
+        $client = new CoolifyApiClient('https://coolify.example.com', 'token', transport: static function (string $method, string $path, ?array $body) use (&$calls, $tag): array {
+            $calls[] = [$method, $path];
+            return $method === 'GET' ? [
+                ['uuid' => 'removed', 'tags' => ['shippercli-managed', $tag.'-db-0123456789']],
+                ['uuid' => 'preview', 'tags' => ['shippercli-managed', $tag.'-pr-42-db-0123456789']],
+                ['uuid' => 'unmanaged', 'tags' => [$tag.'-db-0123456789']],
+                ['uuid' => 'other', 'tags' => ['shippercli-managed', 'other-db-0123456789']],
+            ] : [];
+        });
+        $provider = new CoolifyProvider([], $client);
+        (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client, $this->named('api'), $this->named('production'), 'project', 'environment', 'production', 'server');
+        self::assertSame([['GET', '/databases'], ['DELETE', '/databases/removed']], $calls);
     }
 
     public function testScopeEncodingPreservesBoundariesAndNullProfiles(): void

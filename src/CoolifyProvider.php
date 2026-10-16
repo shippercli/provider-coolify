@@ -1813,9 +1813,12 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 if (! \str_starts_with($tag, $tagPrefix)) {
                     continue;
                 }
-                $rawPullRequestId = \substr($tag, \strlen($tagPrefix));
-                if (\ctype_digit($rawPullRequestId) && (int) $rawPullRequestId > 0) {
-                    $ids[(int) $rawPullRequestId] = (int) $rawPullRequestId;
+                $suffix = \substr($tag, \strlen($tagPrefix));
+                if (\preg_match('/\A([1-9][0-9]*)(?:-db-[a-f0-9]{10})?\z/', $suffix, $matches) === 1) {
+                    $id = \filter_var($matches[1], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                    if ($id !== false) {
+                        $ids[$id] = $id;
+                    }
                 }
             }
         }
@@ -5366,7 +5369,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $this->mergeDatabaseEnvironment($applicationEnvironment, $type, $name, $details, $effectivePassword, $user);
         }
         foreach ($inventory as $database) {
-            if ($this->hasTag($database, $scopeTag) && $this->hasTag($database, self::MARKER)) {
+            if ($this->hasDatabaseScopeTag($database, $scopeTag, false) && $this->hasTag($database, self::MARKER)) {
                 foreach ($this->tagNames($database['tags'] ?? []) as $tag) {
                     if (\str_starts_with($tag, $scopeTag.'-db-') && ! isset($wantedTags[$tag])) {
                         $uuid = $this->resourceUuid($database);
