@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4', '8.5']
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:v2
+          coverage: none
+      - name: Validate package
+        run: composer validate --strict
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Validate optimized autoloading
+        run: composer dump-autoload --optimize --strict-psr
+      - name: Run tests
+        run: composer test -- --fail-on-warning
+      - name: Verify HTTP inventory JSON shapes
+        run: python3 tests/http/test_inventory_shapes.py
+      - name: Verify HTTP error credential diagnostics
+        run: python3 tests/http/test_error_diagnostics.py
+      - name: Verify bounded HTTP retries
+        run: python3 tests/http/test_retries.py
+      - name: Verify non-SQL environment delivery over HTTP
+        run: python3 tests/http/test_nosql_environment.py
+      - name: Verify deployment status privacy over HTTP
+        run: python3 tests/http/test_status_privacy.py
+      - name: Verify provider distribution archives
+        run: python3 tests/package/verify-dist.py
+      - name: Audit dependencies
+        run: composer audit --locked --no-interaction

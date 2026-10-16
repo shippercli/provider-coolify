@@ -1,0 +1,7 @@
+/vendor export-ignore
+/tests export-ignore
+/.github export-ignore
+/.env* export-ignore
+/auth.json export-ignore
+/.phpunit* export-ignore
+/phpunit.xml* export-ignore

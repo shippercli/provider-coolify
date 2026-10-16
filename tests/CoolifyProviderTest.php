@@ -24,7 +24,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $profile = new class {
             public function name(): string { return 'production'; }
@@ -60,13 +60,13 @@ final class CoolifyProviderTest extends TestCase
                     'fqdn' => 'https://42.preview.example.test',
                     'status' => 'running',
                 ]]]]],
-                default => throw new \\LogicException('Unexpected Coolify MCP request.'),
+                default => throw new \LogicException('Unexpected Coolify MCP request.'),
             };
 
             return [
                 'status' => 200,
                 'headers' => [],
-                'body' => \\json_encode(['jsonrpc' => '2.0', 'id' => $message['id'], 'result' => $result], JSON_THROW_ON_ERROR),
+                'body' => \json_encode(['jsonrpc' => '2.0', 'id' => $message['id'], 'result' => $result], JSON_THROW_ON_ERROR),
             ];
         });
 
@@ -83,7 +83,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $profile = new class {
             public function name(): string { return 'production'; }
@@ -143,7 +143,7 @@ final class CoolifyProviderTest extends TestCase
             }; }
             public function config(): array { return ['coolify' => ['url' => 'https://coolify.example.test', 'api_token' => 'api-token']]; }
         };
-        $provider = new CoolifyProvider;
+        $provider = new CoolifyProvider(['url' => 'https://coolify.example.test', 'api_token' => 'api-token']);
 
         $invalid = $provider->validate($project, $profile(['cloud_provider' => 'aws', 'name' => 'production']));
         self::assertContains("Coolify server provisioning does not support cloud_provider 'aws'.", $invalid);
@@ -180,12 +180,41 @@ final class CoolifyProviderTest extends TestCase
             'https://coolify.example.test',
             'api-token',
             transport: static function (string $method, string $path, ?array $body): array {
-                if ($path === '/services?tag='.rawurlencode('shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16))) {
+                if ($path === '/services?tag='.rawurlencode('shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16))) {
                     return [[
                         'uuid' => 'managed-service-uuid',
                         'name' => 'storefront-production-stack',
-                        'tags' => ['shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16), 'shippercli-managed'],
+                        'tags' => ['shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16), 'shippercli-managed'],
                     ]];
+                }
+                if ($path === '/services/managed-service-uuid/logs?sub_service_name=worker&lines=100&show_timestamps=0') {
+                    return ['logs' => "started\nready\n"];
+                }
+
+                throw new \RuntimeException("Unexpected Coolify request: {$method} {$path}");
+            },
+        ));
+
+        self::assertSame(['started', 'ready'], $provider->logs($project, $profile));
+    }
+
+    public function testProviderLevelSubServiceNameSelectsComposeServiceLogs(): void
+    {
+        $project = new class {
+            public function name(): string { return 'storefront'; }
+        };
+        $profile = new class {
+            public function name(): string { return 'production'; }
+            public function config(): array { return []; }
+        };
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
+        $provider = new CoolifyProvider(['sub_service_name' => 'worker'], new CoolifyApiClient(
+            'https://coolify.example.test',
+            'api-token',
+            transport: static function (string $method, string $path, ?array $body) use ($tag): array {
+                if ($path === '/services?tag='.rawurlencode($tag)) {
+                    return [['uuid' => 'managed-service-uuid', 'name' => 'storefront-production-stack',
+                        'tags' => [$tag, 'shippercli-managed']]];
                 }
                 if ($path === '/services/managed-service-uuid/logs?sub_service_name=worker&lines=100&show_timestamps=0') {
                     return ['logs' => "started\nready\n"];
@@ -213,7 +242,7 @@ final class CoolifyProviderTest extends TestCase
                 ]];
             }
         };
-        $tag = 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16);
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
         $calls = [];
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
@@ -221,7 +250,7 @@ final class CoolifyProviderTest extends TestCase
             transport: static function (string $method, string $path, ?array $body) use (&$calls, $tag): array {
                 $calls[] = [$method, $path, $body];
                 if ($path === '/databases') {
-                    return [['uuid' => 'db-primary', 'name' => 'primary', 'tags' => [$tag, 'shippercli-managed']]];
+                    return [['uuid' => 'db-primary', 'name' => 'primary', 'tags' => [$tag.'-db-'.substr(hash('sha256', 'primary'), 0, 10), 'shippercli-managed']]];
                 }
                 if ($path === '/databases/db-primary/logs?lines=100&show_timestamps=0') {
                     return ['logs' => "db ready\nconnected\n"];
@@ -254,7 +283,7 @@ final class CoolifyProviderTest extends TestCase
                 ]];
             }
         };
-        $tag = 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16).'-pr-42';
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16).'-pr-42';
         $calls = [];
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
@@ -268,7 +297,7 @@ final class CoolifyProviderTest extends TestCase
                         'tags' => [$tag, 'shippercli-managed'],
                     ]];
                 }
-                if ($path === '/applications/worker-pr-42/logs?lines=100') {
+                if ($path === '/applications/worker-pr-42/logs?lines=100&show_timestamps=0') {
                     return ['logs' => "worker ready\n"];
                 }
 
@@ -280,7 +309,7 @@ final class CoolifyProviderTest extends TestCase
         self::assertSame(['worker ready'], $provider->logs($project, $profile));
         self::assertSame([
             ['GET', '/applications?tag='.rawurlencode($tag), null],
-            ['GET', '/applications/worker-pr-42/logs?lines=100', null],
+            ['GET', '/applications/worker-pr-42/logs?lines=100&show_timestamps=0', null],
         ], $calls);
     }
 
@@ -417,6 +446,7 @@ final class CoolifyProviderTest extends TestCase
             $deployResource->invoke($provider, $client, 'app-123', '42');
             self::fail('Expected a missing Coolify pull request preview to fail deployment.');
         } catch (\RuntimeException $exception) {
+            self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $exception);
             self::assertStringContainsString('Pull request 42 not found', $exception->getMessage());
         }
     }
@@ -425,7 +455,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -497,7 +527,7 @@ final class CoolifyProviderTest extends TestCase
         $ensureWorkerReplicas = new \ReflectionMethod($provider, 'ensureWorkerReplicas');
         $desiredWorkerNames = [];
 
-        $ensureWorkerReplicas->invoke($provider, $client, $project, $profile, 'project-1', 'environment-1', 'production', 'server-1', 'queue-default', 'php artisan queue:work', 1, $desiredWorkerNames);
+        $ensureWorkerReplicas->invokeArgs($provider, [$client, $project, $profile, 'project-1', 'environment-1', 'production', 'server-1', 'queue-default', 'php artisan queue:work', 1, &$desiredWorkerNames]);
 
         self::assertContains(['PATCH', '/applications/worker-app', [
             'max_restart_count' => 5,
@@ -512,7 +542,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -539,7 +569,7 @@ final class CoolifyProviderTest extends TestCase
         $ensureApplication->invoke($provider, $client, $project, $profile, 'project-1', 'environment-1', 'production', 'server-1', 'storefront-production', null);
 
         self::assertSame(
-            ['team-web', 'customer-facing', 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16), 'shippercli-managed'],
+            ['team-web', 'customer-facing', 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16), 'shippercli-managed'],
             $requestBody['tags'],
         );
     }
@@ -567,7 +597,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -575,7 +605,7 @@ final class CoolifyProviderTest extends TestCase
             public function branch(): string { return 'main'; }
             public function config(): array { return ['coolify' => ['application' => ['tags' => ['team-web', 'customer-facing']]]]; }
         };
-        $tag = 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16);
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
         $calls = [];
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
@@ -616,7 +646,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
             public function deployScript(): string { return 'php artisan migrate --force'; }
         };
@@ -670,7 +700,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
             public function redirects(): array
             {
@@ -730,7 +760,7 @@ final class CoolifyProviderTest extends TestCase
             public function config(): array { return ['coolify' => $this->settings]; }
             public function get(string $key, mixed $default = null): mixed { return $this->settings[$key] ?? $default; }
         };
-        $provider = new CoolifyProvider;
+        $provider = new CoolifyProvider([], new CoolifyApiClient('https://coolify.example.test', 'token', transport: static fn (): array => []));
 
         self::assertContains(
             'Configure the Shipper deployment script as a Coolify post-deployment command',
@@ -765,7 +795,7 @@ final class CoolifyProviderTest extends TestCase
                 ];
             }
         };
-        $provider = new CoolifyProvider;
+        $provider = new CoolifyProvider([], new CoolifyApiClient('https://coolify.example.test', 'token', transport: static fn (): array => []));
         $actions = $provider->plan($project, $profile)['actions'];
 
         self::assertNotContains('Set Nixpacks PHP version to 8.3', $actions);
@@ -836,7 +866,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -864,8 +894,7 @@ final class CoolifyProviderTest extends TestCase
         $ensureWorkerReplicas = new \ReflectionMethod($provider, 'ensureWorkerReplicas');
         $desiredWorkerNames = [];
 
-        $ensureWorkerReplicas->invoke(
-            $provider,
+        $ensureWorkerReplicas->invokeArgs($provider, [
             $client,
             $project,
             $profile,
@@ -876,11 +905,11 @@ final class CoolifyProviderTest extends TestCase
             'daemon-worker',
             'php artisan schedule:work',
             1,
-            $desiredWorkerNames,
+            &$desiredWorkerNames,
             [],
             true,
             ['custom_docker_run_options' => "--user '1000:1000'"],
-        );
+        ]);
 
         self::assertContains(
             ['PATCH', '/applications/worker-1', ['custom_docker_run_options' => "--init --user '1000:1000'"]],
@@ -899,7 +928,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function queues(): array
             {
                 return ['default' => new class {
@@ -929,7 +958,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -1345,7 +1374,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $profile = new class {
             public function name(): string { return 'production'; }
@@ -1540,7 +1569,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $provider = new CoolifyProvider([
             'url' => 'https://coolify.example.test',
@@ -1575,7 +1604,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
         $profile = new class {
             public function name(): string { return 'production'; }
@@ -1603,7 +1632,7 @@ final class CoolifyProviderTest extends TestCase
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
-            public function repositoryUrl(): string { return 'https://github.com/example/storefront'; }
+            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
             public function queues(): array { return [new \stdClass]; }
         };
         $profile = new class {
@@ -2025,7 +2054,7 @@ final class CoolifyProviderTest extends TestCase
         $profile = new class {
             public function name(): string { return 'production'; }
         };
-        $prefix = 'shipper-'.substr(hash('sha256', 'storefront|production'), 0, 16).'-';
+        $prefix = 'shipper-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 10).'-';
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
             'api-token',
@@ -2052,7 +2081,6 @@ final class CoolifyProviderTest extends TestCase
         self::assertSame([[
             'uuid' => 'task-1',
             'name' => $prefix.'nightly',
-            'command' => 'php artisan backup',
             'frequency' => 'daily',
             'enabled' => true,
             'container' => null,
@@ -2281,7 +2309,7 @@ final class CoolifyProviderTest extends TestCase
                 $calls[] = [$method, $path, $body];
 
                 return match ([$method, $path]) {
-                    ['GET', '/services?tag='.rawurlencode('shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16))] => [],
+                    ['GET', '/services?tag='.rawurlencode('shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16))] => [],
                     ['POST', '/services'] => ['uuid' => 'service-123', 'service_type' => 'actualbudget'],
                     default => [],
                 };
@@ -2312,7 +2340,7 @@ final class CoolifyProviderTest extends TestCase
 
     public function testCatalogServiceCannotBeConvertedToCustomComposeInPlace(): void
     {
-        $tag = 'shippercli-'.substr(hash('sha256', 'storefront|production'), 0, 16);
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
         $calls = [];
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
@@ -2347,6 +2375,7 @@ final class CoolifyProviderTest extends TestCase
         } catch (\ReflectionException $exception) {
             throw $exception;
         } catch (\RuntimeException $exception) {
+            self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $exception);
             self::assertStringContainsString('refusing to convert', $exception->getMessage());
         }
         self::assertNotContains('PATCH', array_column($calls, 0));
@@ -2645,7 +2674,7 @@ final class CoolifyProviderTest extends TestCase
         $created = $provider->createServer(['name' => 'stage', 'ip' => '192.0.2.11']);
 
         self::assertFalse($provider->deleteServer('sv-456', $created['ownership_token']));
-        self::assertStringContainsString('still hosts managed resources', $provider->getLastError());
+        self::assertStringContainsString('still hosts resources', $provider->getLastError());
         self::assertNotContains(['DELETE', '/servers/sv-456', null], $calls);
     }
 }
