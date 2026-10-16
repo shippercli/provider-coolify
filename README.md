@@ -554,3 +554,20 @@ These guards cover recognized metadata in the root, `meta`, `links`,
 response envelopes or pagination protocols. Coolify's documented application
 list is a flat all-applications response; live/version-specific schema checks
 remain required. Error diagnostics do not include the continuation URL/payload.
+
+### Raw JSON inventory shapes
+
+Inventory GETs use a dedicated client path that checks JSON shape before it is
+lost during associative decoding. `{}` and `[]` are distinct: an empty object,
+a numeric-key object, an object-valued `data`/`items` container, and an empty HTTP
+body do not establish an empty list. Valid flat arrays and array-valued wrappers
+remain supported. Application environment inventory uses the same validated list
+path. Ordinary mutation acknowledgements can still return `{}`.
+
+`python3 tests/http/test_inventory_shapes.py` exercises real local HTTP/cURL
+requests with synthetic credentials, verifies shape handling, and proves bad
+database JSON blocks plan/destroy without writes. The negative control with the
+shape guard disabled reproduces the empty-object acceptance. This test runs in
+CI alongside PHPUnit; it needs loopback socket access and contacts no live account.
+The generic untyped request method remains available for object/acknowledgement
+endpoints; callers must use the inventory path when completeness matters.

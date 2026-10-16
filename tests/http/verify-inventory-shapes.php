@@ -1,0 +1,28 @@
+<?php
+
+declare(strict_types=1);
+
+require dirname(__DIR__, 2).'/vendor/autoload.php';
+
+use ShipperCli\ProviderCoolify\CoolifyApiClient;
+use ShipperCli\ProviderCoolify\CoolifyProvider;
+
+$client = new CoolifyApiClient($argv[1], 'synthetic-local-only');
+foreach (['empty-object', 'numeric-object', 'wrapped-object', 'wrapped-items-object', 'blank', 'both'] as $path) {
+    $failure = null;
+    try { $client->requestInventory('/'.$path); } catch (RuntimeException $error) { $failure = $error; }
+    if ($failure === null) throw new RuntimeException('Invalid inventory JSON shape was accepted: '.$path);
+}
+$provider = new CoolifyProvider([], $client);
+$parse = new ReflectionMethod($provider, 'list');
+foreach (['empty-array', 'wrapped-array', 'items-array'] as $path) {
+    if ($parse->invoke($provider, $client->requestInventory('/'.$path)) !== []) {
+        throw new RuntimeException('Valid empty inventory was rejected');
+    }
+}
+if ($client->request('PATCH', '/ack') !== []) throw new RuntimeException('Empty-object mutation acknowledgement changed');
+$project = new class { public function name(): string { return 'fixture'; } };
+$profile = new class { public function name(): string { return 'production'; } };
+if (! $provider->plan($project, $profile)['blocked']) throw new RuntimeException('Empty-object database response did not block plan');
+if ($provider->destroy($project, $profile)) throw new RuntimeException('Empty-object database response did not fail destroy');
+echo "HTTP inventory shape and blocked-flow checks passed\n";

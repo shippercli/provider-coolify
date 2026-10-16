@@ -40,4 +40,31 @@ final class CoolifyApiClientTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $client->request('GET', 'applications');
     }
+    public function testRawInventoryJsonPreservesObjectVersusListShape(): void
+    {
+        $client = new CoolifyApiClient('https://example.test', 'synthetic');
+        $decode = new \ReflectionMethod($client, 'decodeInventory');
+        foreach (['{}', '{"0":{"uuid":"one"}}', '{"data":{}}', '{"items":{}}', '', '{"data":[],"items":[]}'] as $body) {
+            $failure = null;
+            try { $decode->invoke($client, $body); } catch (\RuntimeException $error) { $failure = $error; }
+            self::assertInstanceOf(\RuntimeException::class, $failure);
+        }
+        foreach (['[]', '{"data":[]}', '{"items":[]}'] as $body) {
+            self::assertSame(json_decode($body, true), $decode->invoke($client, $body));
+        }
+    }
+
+    public function testInventoryTransportUsesGetAndRejectsObjectValuedRowsContainer(): void
+    {
+        $request = null;
+        $client = new CoolifyApiClient('https://example.test', 'synthetic', transport:
+            static function ($method, $path, $body) use (&$request): array {
+                $request = [$method, $path, $body]; return ['data' => new \stdClass];
+            });
+        $failure = null;
+        try { $client->requestInventory('/databases'); } catch (\RuntimeException $error) { $failure = $error; }
+        self::assertInstanceOf(\RuntimeException::class, $failure);
+        self::assertSame(['GET', '/databases', null], $request);
+    }
+
 }

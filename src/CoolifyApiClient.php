@@ -38,6 +38,20 @@ final class CoolifyApiClient
      */
     public function request(string $method, string $path, ?array $body = null): array
     {
+        return $this->requestJson($method, $path, $body, false);
+    }
+
+    /** @return array<string, mixed> */
+    public function requestInventory(string $path): array
+    {
+        return $this->requestJson('GET', $path, null, true);
+    }
+
+    /** @param array<string, mixed>|null $body
+     *  @return array<string, mixed>
+     */
+    private function requestJson(string $method, string $path, ?array $body, bool $inventory): array
+    {
         if (! \str_starts_with($path, '/') || \str_contains($path, "\n") || \str_contains($path, "\r")) {
             throw new \InvalidArgumentException('Coolify API paths must be absolute API paths.');
         }
@@ -48,6 +62,9 @@ final class CoolifyApiClient
                 throw new \RuntimeException('Coolify test transport returned a non-object response.');
             }
 
+            if ($inventory) {
+                return $this->decodeInventory(\json_encode($response, JSON_THROW_ON_ERROR));
+            }
             return $response;
         }
 
@@ -94,6 +111,30 @@ final class CoolifyApiClient
             throw new \RuntimeException("Coolify API request failed (HTTP {$status}): {$message}.{$retryMessage}");
         }
 
+        return $inventory ? $this->decodeInventory($responseBody) : $decoded;
+    }
+
+    /** @return array<string, mixed> */
+    private function decodeInventory(string $body): array
+    {
+        if ($body === '') {
+            throw new \RuntimeException('Coolify inventory response has no JSON body.');
+        }
+        try {
+            $shape = \json_decode($body, false, 512, JSON_THROW_ON_ERROR);
+            $decoded = \json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $error) {
+            throw new \RuntimeException('Coolify inventory response has invalid JSON.', 0, $error);
+        }
+        if (\is_array($shape)) return $decoded;
+        if (! $shape instanceof \stdClass) {
+            throw new \RuntimeException('Coolify inventory response must contain a JSON list.');
+        }
+        $hasData = \property_exists($shape, 'data');
+        $hasItems = \property_exists($shape, 'items');
+        if ($hasData === $hasItems || ! \is_array($hasData ? $shape->data : $shape->items)) {
+            throw new \RuntimeException('Coolify inventory response has an invalid JSON list envelope.');
+        }
         return $decoded;
     }
 

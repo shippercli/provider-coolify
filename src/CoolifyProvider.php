@@ -732,7 +732,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 throw new \RuntimeException('Coolify application identity is invalid.');
             }
             if ($app === null) {
-                foreach ($this->list($client->request('GET', '/applications')) as $candidate) {
+                foreach ($this->list($client->requestInventory('/applications')) as $candidate) {
                     if ($this->resourceUuid($candidate) === '' || ! \is_string($candidate['name'] ?? null) || $candidate['name'] === '') {
                         throw new \RuntimeException('Coolify application inventory contains an invalid identity.');
                     }
@@ -748,7 +748,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             try {
                 $scope = $this->resourceTag($project, $profile);
                 if (($pr = $this->pullRequestId($profile)) !== '') $scope .= '-pr-'.$pr;
-                $this->validateDatabaseInventory($this->list($this->getClient()->request('GET', '/databases')), $scope);
+                $this->validateDatabaseInventory($this->list($this->getClient()->requestInventory('/databases')), $scope);
             } catch (\Throwable) {
                 $blocked = 'Unable to verify Coolify database inventory and ownership. Review API access and resource tags before deployment.';
             }
@@ -981,7 +981,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $client = $this->getClient();
             $tag = $this->resourceTag($project, $profile);
             $ownedDatabases = $this->ownedDatabasesForProfile($client, $tag);
-            $apps = $this->validateApplicationInventory($this->list($client->request('GET', '/applications')), $tag);
+            $apps = $this->validateApplicationInventory($this->list($client->requestInventory('/applications')), $tag);
             $services = $this->ownedServices($client, $tag);
             $serviceUuids = [];
             foreach ($services as $service) {
@@ -1335,7 +1335,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function deployments(): array
     {
-        return $this->list($this->getClient()->request('GET', '/deployments'));
+        return $this->list($this->getClient()->requestInventory('/deployments'));
     }
 
     /** @return array<string, mixed> */
@@ -1353,7 +1353,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
         $path = '/deployments/applications/'.\rawurlencode($applicationUuid);
 
-        return $this->list($this->getClient()->request('GET', $path.'?'.\http_build_query(['skip' => $skip, 'take' => $take])));
+        return $this->list($this->getClient()->requestInventory($path.'?'.\http_build_query(['skip' => $skip, 'take' => $take])));
     }
 
     /** @return array{current?: string, images?: list<array{tag: string, created_at?: string, is_current?: bool}>} */
@@ -1446,7 +1446,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         $uuid = $this->resourceUuid($app);
         $application = $this->getClient()->request('GET', '/applications/'.\rawurlencode($uuid));
-        $runningDeployments = $this->list($this->getClient()->request('GET', '/deployments'));
+        $runningDeployments = $this->list($this->getClient()->requestInventory('/deployments'));
         $applicationId = $application['id'] ?? $app['id'] ?? null;
         $deployments = \array_values(\array_filter($runningDeployments, static function (array $deployment) use ($applicationId, $pullRequestId): bool {
             if ($applicationId === null || ! isset($deployment['application_id'])
@@ -1853,8 +1853,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $tagPrefix = $this->resourceTag($project, $profile).'-pr-';
         $ids = [];
         foreach ([
-            ...$this->list($client->request('GET', '/applications')),
-            ...$this->list($client->request('GET', '/databases')),
+            ...$this->list($client->requestInventory('/applications')),
+            ...$this->list($client->requestInventory('/databases')),
         ] as $resource) {
             if (! $this->hasTag($resource, self::MARKER)) {
                 continue;
@@ -1927,13 +1927,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function destinations(): array
     {
-        return $this->list($this->getClient()->request('GET', '/destinations'));
+        return $this->list($this->getClient()->requestInventory('/destinations'));
     }
 
     /** @return list<array<string, mixed>> */
     public function serverDestinations(string $serverUuid): array
     {
-        return $this->list($this->getClient()->request('GET', '/servers/'.\rawurlencode($serverUuid).'/destinations'));
+        return $this->list($this->getClient()->requestInventory('/servers/'.\rawurlencode($serverUuid).'/destinations'));
     }
 
     /** @return array<string, mixed> */
@@ -1968,7 +1968,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         $path = '/applications'.($tag !== null ? '?'.\http_build_query(['tag' => $tag]) : '');
 
-        return $this->list($this->getClient()->request('GET', $path));
+        return $this->list($this->getClient()->requestInventory($path));
     }
 
     /** @return array<string|int, mixed> */
@@ -2002,9 +2002,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             throw new \InvalidArgumentException('Coolify application UUID must not be empty.');
         }
 
-        return $this->list($this->getClient()->request(
-            'GET',
-            '/applications/'.\rawurlencode($applicationUuid).'/destinations',
+        return $this->list($this->getClient()->requestInventory('/applications/'.\rawurlencode($applicationUuid).'/destinations',
         ));
     }
 
@@ -2208,7 +2206,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function servers(): array
     {
-        return $this->list($this->getClient()->request('GET', '/servers'));
+        return $this->list($this->getClient()->requestInventory('/servers'));
     }
 
     public function resolveServer(array $server): ?array
@@ -2226,7 +2224,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         if ($identifiers === []) {
             return null;
         }
-        $servers = $this->list($this->getClient()->request('GET', '/servers'));
+        $servers = $this->list($this->getClient()->requestInventory('/servers'));
         foreach ($servers as $candidate) {
             $matches = true;
             foreach ($identifiers as $key => $value) {
@@ -2516,13 +2514,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function serverResources(string $serverId): array
     {
-        return $this->list($this->getClient()->request('GET', '/servers/'.\rawurlencode($serverId).'/resources'));
+        return $this->list($this->getClient()->requestInventory('/servers/'.\rawurlencode($serverId).'/resources'));
     }
 
     /** @return list<array{ip?: string, domains?: list<string>}> */
     public function serverDomains(string $serverId): array
     {
-        return $this->list($this->getClient()->request('GET', '/servers/'.\rawurlencode($serverId).'/domains'));
+        return $this->list($this->getClient()->requestInventory('/servers/'.\rawurlencode($serverId).'/domains'));
     }
 
     /** @return array<string, mixed> */
@@ -2806,13 +2804,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $query = '?'.\http_build_query(['cloud_provider_token_uuid' => $cloudProviderTokenUuid]);
         }
 
-        return $this->list($this->getClient()->request('GET', '/'.$provider.'/'.$catalog.$query));
+        return $this->list($this->getClient()->requestInventory('/'.$provider.'/'.$catalog.$query));
     }
 
     /** @return list<array<string, mixed>> */
     public function cloudProviderTokens(): array
     {
-        return $this->list($this->getClient()->request('GET', '/cloud-tokens'));
+        return $this->list($this->getClient()->requestInventory('/cloud-tokens'));
     }
 
     /** @return array<string, mixed> */
@@ -2863,7 +2861,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** Source integration responses may include sensitive metadata; avoid logging these values. @return list<array<string, mixed>> */
     public function githubApps(): array
     {
-        return $this->list($this->getClient()->request('GET', '/github-apps'));
+        return $this->list($this->getClient()->requestInventory('/github-apps'));
     }
 
     /** @param array<string, mixed> $application @return array<string, mixed> */
@@ -2916,7 +2914,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function gitlabApps(): array
     {
-        return $this->list($this->getClient()->request('GET', '/gitlab-apps'));
+        return $this->list($this->getClient()->requestInventory('/gitlab-apps'));
     }
 
     /** @param array<string, mixed> $application @return array<string, mixed> */
@@ -2947,7 +2945,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** Team responses include member details; avoid exposing them in logs. @return list<array<string, mixed>> */
     public function teams(): array
     {
-        return $this->list($this->getClient()->request('GET', '/teams'));
+        return $this->list($this->getClient()->requestInventory('/teams'));
     }
 
     /** @return array<string, mixed> */
@@ -2979,13 +2977,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             throw new \InvalidArgumentException('Coolify team ID must be a positive integer.');
         }
 
-        return $this->list($this->getClient()->request('GET', '/teams/'.$teamId.'/members'));
+        return $this->list($this->getClient()->requestInventory('/teams/'.$teamId.'/members'));
     }
 
     /** @return list<array<string, mixed>> */
     public function authenticatedTeamMembers(): array
     {
-        return $this->list($this->getClient()->request('GET', '/team/members'));
+        return $this->list($this->getClient()->requestInventory('/team/members'));
     }
 
     /** @param array<string, mixed> $changes @return array<string, mixed> */
@@ -3076,7 +3074,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** Cloud-init content may contain sensitive provisioning details; restrict access to trusted team members. @return list<array<string, mixed>> */
     public function cloudInitScripts(): array
     {
-        return $this->list($this->getClient()->request('GET', '/cloud-init-scripts'));
+        return $this->list($this->getClient()->requestInventory('/cloud-init-scripts'));
     }
 
     /** @return array<string, mixed> */
@@ -3119,7 +3117,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** Private-key listing may return the private key material; call only with appropriately scoped access. @return list<array<string, mixed>> */
     public function privateKeys(): array
     {
-        return $this->list($this->getClient()->request('GET', '/security/keys'));
+        return $this->list($this->getClient()->requestInventory('/security/keys'));
     }
 
     /** Private-key details can include private key material; call only with appropriately scoped access. @return array<string, mixed> */
@@ -3176,7 +3174,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function s3Storages(): array
     {
-        return $this->list($this->getClient()->request('GET', '/s3-storages'));
+        return $this->list($this->getClient()->requestInventory('/s3-storages'));
     }
 
     /** S3 credentials are sensitive; Coolify's detail response may redact them depending on token permissions. @return array<string, mixed> */
@@ -3257,7 +3255,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function scheduledTasks(string $resourceType, string $resourceUuid): array
     {
-        return $this->list($this->getClient()->request('GET', $this->scheduledTasksPath($resourceType, $resourceUuid)));
+        return $this->list($this->getClient()->requestInventory($this->scheduledTasksPath($resourceType, $resourceUuid)));
     }
 
     /** @param array{name: string, command: string, frequency: string, container?: string, timeout?: int, enabled?: bool} $task
@@ -3292,7 +3290,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function scheduledTaskExecutions(string $resourceType, string $resourceUuid, string $taskUuid): array
     {
-        return $this->list($this->getClient()->request('GET', $this->scheduledTasksPath($resourceType, $resourceUuid).'/'.\rawurlencode($taskUuid).'/executions'));
+        return $this->list($this->getClient()->requestInventory($this->scheduledTasksPath($resourceType, $resourceUuid).'/'.\rawurlencode($taskUuid).'/executions'));
     }
 
     /** @return array<string, mixed> */
@@ -3344,7 +3342,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function services(): array
     {
-        return $this->list($this->getClient()->request('GET', '/services'));
+        return $this->list($this->getClient()->requestInventory('/services'));
     }
 
     public function serviceResource(string $serviceUuid): array
@@ -3443,7 +3441,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function databases(): array
     {
-        return $this->list($this->getClient()->request('GET', '/databases'));
+        return $this->list($this->getClient()->requestInventory('/databases'));
     }
 
     public function databaseResource(string $databaseUuid): array
@@ -3497,7 +3495,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** Database env responses may contain secrets; Coolify permissions control whether values are returned. @return list<array<string, mixed>> */
     public function databaseEnvironmentVariables(string $databaseUuid): array
     {
-        return $this->list($this->getClient()->request('GET', '/databases/'.\rawurlencode($databaseUuid).'/envs'));
+        return $this->list($this->getClient()->requestInventory('/databases/'.\rawurlencode($databaseUuid).'/envs'));
     }
 
     /** @param array<string, mixed> $variable @return array<string, mixed> */
@@ -3536,7 +3534,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function resourceStorages(string $resourceType, string $resourceUuid): array
     {
-        return $this->list($this->getClient()->request('GET', $this->resourceStoragePath($resourceType, $resourceUuid)));
+        return $this->list($this->getClient()->requestInventory($this->resourceStoragePath($resourceType, $resourceUuid)));
     }
 
     /** @param array<string, mixed> $storage @return array<string, mixed> */
@@ -3921,7 +3919,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function tags(): array
     {
-        return $this->list($this->getClient()->request('GET', '/tags'));
+        return $this->list($this->getClient()->requestInventory('/tags'));
     }
 
     /** @return array<string, mixed> */
@@ -3951,7 +3949,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function resourceTags(string $resourceType, string $resourceUuid): array
     {
-        return $this->list($this->getClient()->request('GET', $this->taggableResourcePath($resourceType, $resourceUuid).'/tags'));
+        return $this->list($this->getClient()->requestInventory($this->taggableResourcePath($resourceType, $resourceUuid).'/tags'));
     }
 
     /** @param list<string> $tagNames @return list<array<string, mixed>> */
@@ -3976,7 +3974,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function projects(): array
     {
-        return $this->list($this->getClient()->request('GET', '/projects'));
+        return $this->list($this->getClient()->requestInventory('/projects'));
     }
 
     /** @return array<string, mixed> */
@@ -4006,7 +4004,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function environments(string $projectUuid): array
     {
-        return $this->list($this->getClient()->request('GET', '/projects/'.\rawurlencode($projectUuid).'/environments'));
+        return $this->list($this->getClient()->requestInventory('/projects/'.\rawurlencode($projectUuid).'/environments'));
     }
 
     /** @return array<string, mixed> */
@@ -4109,7 +4107,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function serviceDatabases(string $serviceUuid): array
     {
-        return $this->list($this->getClient()->request('GET', '/services/'.\rawurlencode($serviceUuid).'/databases'));
+        return $this->list($this->getClient()->requestInventory('/services/'.\rawurlencode($serviceUuid).'/databases'));
     }
 
     /** @return array<string, mixed> */
@@ -4188,7 +4186,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function serviceApplications(string $serviceUuid): array
     {
-        return $this->list($this->getClient()->request('GET', '/services/'.\rawurlencode($serviceUuid).'/applications'));
+        return $this->list($this->getClient()->requestInventory('/services/'.\rawurlencode($serviceUuid).'/applications'));
     }
 
     /** @return array<string, mixed> */
@@ -4284,7 +4282,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return list<array<string, mixed>> */
     public function serverDockerCleanupExecutions(string $serverId): array
     {
-        return $this->list($this->getClient()->request('GET', '/servers/'.\rawurlencode($serverId).'/docker-cleanup/executions'));
+        return $this->list($this->getClient()->requestInventory('/servers/'.\rawurlencode($serverId).'/docker-cleanup/executions'));
     }
 
     public function deleteServer(string $serverId, string $ownershipToken): bool
@@ -4337,7 +4335,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                     return false;
                 }
             }
-            $resources = $this->list($this->getClient()->request('GET', '/servers/'.\rawurlencode($serverId).'/resources'));
+            $resources = $this->list($this->getClient()->requestInventory('/servers/'.\rawurlencode($serverId).'/resources'));
             if ($resources !== []) {
                 $descriptions = [];
                 foreach ($resources as $resource) {
@@ -4445,7 +4443,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $projectUuid = $this->profileOption($profile, 'project_uuid', $this->stringConfig('project_uuid'));
         if ($projectUuid === '') {
             $projectName = $this->profileOption($profile, 'project_name', $this->stringConfig('project_name', $this->projectName($project)));
-            $projects = $this->list($client->request('GET', '/projects'));
+            $projects = $this->list($client->requestInventory('/projects'));
             foreach ($projects as $candidate) {
                 if (($candidate['name'] ?? null) === $projectName && \is_string($candidate['uuid'] ?? null)) {
                     $projectUuid = $candidate['uuid'];
@@ -4464,7 +4462,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $environmentName = $this->profileOption($profile, 'environment_name', $this->profileName($profile) ?: 'production');
         $environmentUuid = $this->profileOption($profile, 'environment_uuid', $this->stringConfig('environment_uuid'));
         if ($environmentUuid === '') {
-            $environments = $this->list($client->request('GET', '/projects/'.\rawurlencode($projectUuid).'/environments'));
+            $environments = $this->list($client->requestInventory('/projects/'.\rawurlencode($projectUuid).'/environments'));
             $environmentFound = false;
             foreach ($environments as $environment) {
                 if (($environment['name'] ?? null) === $environmentName) {
@@ -4511,7 +4509,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         if ($appUuid !== '') {
             $app = $this->readOwnedApplication($client, $appUuid, $tag);
         } else {
-            foreach ($this->validateApplicationInventory($this->list($client->request('GET', '/applications?tag='.\rawurlencode($tag))), $tag) as $candidate) {
+            foreach ($this->validateApplicationInventory($this->list($client->requestInventory('/applications?tag='.\rawurlencode($tag))), $tag) as $candidate) {
                 if (($candidate['name'] ?? null) === $name && $this->hasTag($candidate, $tag) && $this->hasTag($candidate, self::MARKER)) {
                     $app = $candidate;
                     break;
@@ -4521,7 +4519,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
         $creationInventory = [];
         if ($app === null) {
-            $creationInventory = $this->validateApplicationInventory($this->list($client->request('GET', '/applications')), $tag);
+            $creationInventory = $this->validateApplicationInventory($this->list($client->requestInventory('/applications')), $tag);
             foreach ($creationInventory as $candidate) {
                 if (($candidate['name'] ?? null) === $name) {
                     throw new \RuntimeException('Refusing to create a duplicate Coolify application: its name already exists without matching project/profile ownership tags. Review and migrate the existing application explicitly.');
@@ -4769,8 +4767,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $desiredKeys[$key] = true;
             }
         }
-        $existingVariables = $client->request('GET', '/applications/'.\rawurlencode($uuid).'/envs');
-        $existingVariables = $existingVariables['data'] ?? $existingVariables;
+        $existingVariables = $this->list($client->requestInventory('/applications/'.\rawurlencode($uuid).'/envs'));
         $existingVariablesByScopeAndKey = [];
         if (\is_array($existingVariables)) {
             foreach ($existingVariables as $existing) {
@@ -4903,7 +4900,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         if (\is_array($configuredStorages) && $configuredStorages !== []) {
             $components = [];
             foreach (['applications', 'databases'] as $kind) {
-                foreach ($this->list($client->request('GET', '/services/'.\rawurlencode($serviceUuid).'/'.$kind)) as $component) {
+                foreach ($this->list($client->requestInventory('/services/'.\rawurlencode($serviceUuid).'/'.$kind)) as $component) {
                     $componentUuid = $this->resourceUuid($component);
                     $componentName = $component['name'] ?? $component['service_name'] ?? $component['docker_compose_service_name'] ?? $component['container_name'] ?? null;
                     if (\is_string($componentName) && $componentName !== '' && $componentUuid !== '') {
@@ -4980,7 +4977,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             if (! \is_array($configured) || $configured === []) {
                 continue;
             }
-            $components = $this->list($client->request('GET', '/services/'.\rawurlencode($serviceUuid).'/'.$kind));
+            $components = $this->list($client->requestInventory('/services/'.\rawurlencode($serviceUuid).'/'.$kind));
             foreach ($configured as $componentName => $settings) {
                 $matches = \array_values(\array_filter(
                     $components,
@@ -5164,7 +5161,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         $isNewService = $service === null;
         if ($isNewService) {
-            $creationInventory = $this->validateServiceInventory($this->list($client->request('GET', '/services')), $tag);
+            $creationInventory = $this->validateServiceInventory($this->list($client->requestInventory('/services')), $tag);
             foreach ($creationInventory as $candidate) {
                 if ($this->hasTag($candidate, $tag) && $this->hasTag($candidate, self::MARKER)) {
                     throw new \RuntimeException('Coolify service inventory disagrees with the scoped lookup; refusing duplicate creation.');
@@ -5223,7 +5220,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $this->applyServiceStorageFeatures($client, $uuid, $profile, \is_array($serviceSettings) ? $serviceSettings : []);
         $this->applyServiceComponentOptions($client, $uuid, \is_array($serviceSettings) ? $serviceSettings : []);
         $desiredEnvironment = \array_merge($databaseEnvironment, $this->environmentVariables($project, $profile));
-        $existingEnvironment = $this->list($client->request('GET', '/services/'.\rawurlencode($uuid).'/envs'));
+        $existingEnvironment = $this->list($client->requestInventory('/services/'.\rawurlencode($uuid).'/envs'));
         $existingEnvironmentByKey = [];
         foreach ($existingEnvironment as $variable) {
             $key = $variable['key'] ?? null;
@@ -5259,7 +5256,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $applicationEnvironment = [];
         $baseTag = $this->resourceTag($project, $profile);
         $scopeTag = $this->pullRequestId($profile) !== '' ? $baseTag.'-pr-'.$this->pullRequestId($profile) : $baseTag;
-        $inventory = $this->validateDatabaseInventory($this->list($client->request('GET', '/databases')), $scopeTag);
+        $inventory = $this->validateDatabaseInventory($this->list($client->requestInventory('/databases')), $scopeTag);
         $wantedTags = [];
         foreach ($databases as $database) {
             $name = $this->databaseResourceName($database['name'], $project, $profile);
@@ -5742,7 +5739,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             }
         }
         $path = '/databases/'.\rawurlencode($databaseUuid).'/envs';
-        $existingEnvironment = $this->list($client->request('GET', $path));
+        $existingEnvironment = $this->list($client->requestInventory($path));
         $existingByKey = [];
         foreach ($existingEnvironment as $variable) {
             $key = $variable['key'] ?? null;
@@ -6011,7 +6008,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         $prefix = 'shipper-'.$this->projectProfileHash($project, $profile).'-';
         $tasksPath = '/'.$resourceType.'/'.\rawurlencode($applicationUuid).'/scheduled-tasks';
-        $existing = $this->list($client->request('GET', $tasksPath));
+        $existing = $this->list($client->requestInventory($tasksPath));
         $byName = [];
         foreach ($existing as $task) {
             if (\is_string($task['name'] ?? null)) {
@@ -6089,7 +6086,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         if (! \is_string($currentServerUuid) || $currentServerUuid === '') {
             $serverId = $resource['server_id'] ?? null;
             if (is_int($serverId) || (is_string($serverId) && ctype_digit($serverId))) {
-                foreach ($this->list($client->request('GET', '/servers')) as $server) {
+                foreach ($this->list($client->requestInventory('/servers')) as $server) {
                     if ((string) ($server['id'] ?? '') === (string) $serverId && is_string($server['uuid'] ?? null)) {
                         $currentServerUuid = $server['uuid'];
                         break;
@@ -6288,9 +6285,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             return true;
         }
 
-        $history = $this->list($client->request(
-            'GET',
-            '/deployments/applications/'.\rawurlencode($workerUuid).'?skip=0&take=1',
+        $history = $this->list($client->requestInventory('/deployments/applications/'.\rawurlencode($workerUuid).'?skip=0&take=1',
         ));
 
         if ($history === []) {
@@ -6382,7 +6377,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $tag ??= $this->resourceTag($project, $profile);
 
         return \array_values(\array_filter(
-            $this->validateApplicationInventory($this->list($client->request('GET', '/applications?tag='.\rawurlencode($tag))), $this->resourceTag($project, $profile)),
+            $this->validateApplicationInventory($this->list($client->requestInventory('/applications?tag='.\rawurlencode($tag))), $this->resourceTag($project, $profile)),
             fn (array $app): bool => $this->hasTag($app, $tag) && $this->hasTag($app, self::MARKER),
         ));
     }
@@ -6532,7 +6527,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function ownedDatabases(CoolifyApiClient $client, string $tag): array
     {
         return \array_values(\array_filter(
-            $this->validateDatabaseInventory($this->list($client->request('GET', '/databases')), $tag),
+            $this->validateDatabaseInventory($this->list($client->requestInventory('/databases')), $tag),
             fn (array $database): bool => $this->hasDatabaseScopeTag($database, $tag, false) && $this->hasTag($database, self::MARKER),
         ));
     }
@@ -6541,7 +6536,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function ownedDatabasesForProfile(CoolifyApiClient $client, string $resourceTag): array
     {
         return \array_values(\array_filter(
-            $this->validateDatabaseInventory($this->list($client->request('GET', '/databases')), $resourceTag, true),
+            $this->validateDatabaseInventory($this->list($client->requestInventory('/databases')), $resourceTag, true),
             function (array $database) use ($resourceTag): bool {
                 if (! $this->hasTag($database, self::MARKER)) {
                     return false;
@@ -6569,7 +6564,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function ownedServices(CoolifyApiClient $client, string $tag): array
     {
         return \array_values(\array_filter(
-            $this->validateServiceInventory($this->list($client->request('GET', '/services?tag='.\rawurlencode($tag))), $tag),
+            $this->validateServiceInventory($this->list($client->requestInventory('/services?tag='.\rawurlencode($tag))), $tag),
             fn (array $service): bool => $this->hasTag($service, $tag) && $this->hasTag($service, self::MARKER),
         ));
     }
