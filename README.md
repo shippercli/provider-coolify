@@ -602,3 +602,20 @@ The local HTTP retry regression checks two short GET retries, single-attempt POS
 immediate long-hint failure and invalid-hint failure. The prior implementation
 hit the test's four-second subprocess cutoff while sleeping on a one-hour hint.
 No live account or mutation was used in this check.
+
+### Project/profile database field inheritance
+
+Profile database declarations merge with a same-name project declaration field by
+field. A profile supplying only `password` retains the project's database engine
+and user. Explicit profile type/user/password fields still win. Profile-only
+databases keep the normal MySQL/empty-user defaults; explicit null fields are
+validation errors rather than omitted values.
+
+`php tests/integration/verify-cli-databases.php /path/to/installed/cli` exercises
+real CLI ConfigLoader, ProjectConfig, ProfileConfig, DatabaseConfig and environment
+objects. Both checkouts need dependencies installed; the script loads only the
+CLI configuration/YAML namespaces to avoid mixing test framework versions. It
+checks YAML inheritance, PostgreSQL create payloads, and project/profile environment
+precedence in application requests against a fake API. The unit inheritance tests
+run in provider CI; this separate cross-checkout script was run locally against
+CLI commit aa3e6a7618a32f6d3a1deae6da481f6a56eea721. It performs no live deployment.

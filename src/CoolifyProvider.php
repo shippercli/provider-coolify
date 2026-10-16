@@ -137,7 +137,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                         $errors[] = "Coolify database declaration '{$key}' requires a non-empty name.";
                     }
                     foreach (['type', 'user', 'password'] as $field) {
-                        if (isset($database[$field]) && ! \is_string($database[$field])) {
+                        if (\array_key_exists($field, $database) && ! \is_string($database[$field])) {
                             $errors[] = "Coolify database declaration '{$key}' field '{$field}' must be a string.";
                         }
                     }
@@ -5525,6 +5525,11 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             }
         }
 
+        $byName = [];
+        foreach ($declarations as $database) {
+            $byName[$database['name']] = $database;
+        }
+
         $profileDatabases = $this->profileOptions($profile)['databases'] ?? [];
         if (\is_array($profileDatabases)) {
             foreach ($profileDatabases as $key => $database) {
@@ -5535,18 +5540,14 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 if (! \is_string($name) || $name === '') {
                     continue;
                 }
-                $declarations[] = [
+                $inherited = $byName[$name] ?? ['type' => 'mysql', 'user' => '', 'password' => ''];
+                $byName[$name] = [
                     'name' => $name,
-                    'type' => \is_string($database['type'] ?? null) ? $database['type'] : 'mysql',
-                    'user' => \is_string($database['user'] ?? null) ? $database['user'] : '',
-                    'password' => \is_string($database['password'] ?? null) ? $database['password'] : '',
+                    'type' => \is_string($database['type'] ?? null) ? $database['type'] : $inherited['type'],
+                    'user' => \is_string($database['user'] ?? null) ? $database['user'] : $inherited['user'],
+                    'password' => \is_string($database['password'] ?? null) ? $database['password'] : $inherited['password'],
                 ];
             }
-        }
-
-        $byName = [];
-        foreach ($declarations as $database) {
-            $byName[$database['name']] = $database;
         }
 
         return \array_values($byName);
