@@ -43,7 +43,10 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
             }
             self::assertSame('/applications/app-uuid', $path);
 
-            return ['uuid' => 'app-uuid', 'name' => 'storefront'];
+            return ['uuid' => 'app-uuid', 'name' => 'storefront', 'tags' => [
+                'shippercli-managed',
+                'shippercli-'.substr(hash('sha256', 'storefront|preview'), 0, 16),
+            ]];
         });
         $mcp = new CoolifyMcpClient('https://coolify.example.test', 'token', transport: static function (array $message): array {
             if ($message['method'] === 'notifications/initialized') {

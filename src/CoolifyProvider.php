@@ -4447,6 +4447,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $app = null;
         if ($appUuid !== '') {
             $app = $client->request('GET', '/applications/'.\rawurlencode($appUuid));
+            $this->assertApplicationOwnership($app, $tag);
         } else {
             foreach ($this->list($client->request('GET', '/applications?tag='.\rawurlencode($tag))) as $candidate) {
                 if (($candidate['name'] ?? null) === $name && $this->hasTag($candidate, $tag) && $this->hasTag($candidate, self::MARKER)) {
@@ -4624,9 +4625,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             if ($uuid === '') {
                 throw new \RuntimeException('Coolify returned an existing application without a UUID.');
             }
-            if (! $this->hasTag($app, self::MARKER) && $appUuid === '') {
-                throw new \RuntimeException('Refusing to adopt an untagged Coolify application.');
-            }
+            $this->assertApplicationOwnership($app, $tag);
             $existingTags = $app['tags'] ?? [];
             unset($payload['tags']);
             $existingSource = \is_string($app['docker_registry_image_name'] ?? null) && $app['docker_registry_image_name'] !== ''
@@ -6135,7 +6134,10 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     {
         $uuid = $this->profileOption($profile, 'application_uuid', $this->stringConfig('application_uuid'));
         if ($uuid !== '') {
-            return $client->request('GET', '/applications/'.\rawurlencode($uuid));
+            $app = $client->request('GET', '/applications/'.\rawurlencode($uuid));
+            $this->assertApplicationOwnership($app, $this->resourceTag($project, $profile));
+
+            return $app;
         }
         foreach ($this->ownedApplications($client, $project, $profile) as $app) {
             if (($app['name'] ?? null) === $this->resourceName($project, $profile)) {
@@ -6156,6 +6158,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             }
 
             throw $exception;
+        }
+    }
+
+    private function assertApplicationOwnership(array $app, string $tag): void
+    {
+        if (! $this->hasTag($app, self::MARKER) || ! $this->hasTag($app, $tag)) {
+            throw new \RuntimeException('Refusing to modify a Coolify application without matching Shipper project/profile ownership tags. An application UUID does not establish ownership.');
         }
     }
 

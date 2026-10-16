@@ -331,3 +331,12 @@ Coolify rollback only restores a retained application image/commit. It does not 
 See the [Coolify API reference](https://coolify.io/docs/api/overview) for API-token setup and self-hosted API access requirements.
 
 Shipper's project-level `nginx_config` is applied to Git-based Coolify Static applications and to Git-based Nixpacks or Railpack applications when `coolify.application.is_static: true`. Coolify serves those static outputs through Nginx. Other build packs and non-Git sources reject this setting rather than silently ignoring it.
+
+## Existing application ownership
+
+An explicit `application_uuid` selects a resource; it does not authorize adoption.
+Apply and application lookup require both `shippercli-managed` and the matching
+project/profile resource tag before using an existing application. Missing or
+differently scoped tags fail closed before application updates or retagging.
+Review the resource identity and deployment scope separately before explicitly
+migrating tags through Coolify; Shipper does not automatically adopt it.
