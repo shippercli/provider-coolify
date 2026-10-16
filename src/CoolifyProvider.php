@@ -4710,7 +4710,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             foreach (['autogenerate_domain', 'dockerfile_target_build', 'static_image', 'is_http_basic_auth_enabled', 'http_basic_auth_username', 'http_basic_auth_password'] as $createOnlyOption) {
                 unset($payload[$createOnlyOption]);
             }
-            $app = $client->request('PATCH', '/applications/'.\rawurlencode($uuid), $payload) + $app;
+            $app = $this->checkedResourceUpdate($app, $client->request('PATCH', '/applications/'.\rawurlencode($uuid), $payload), $uuid, $tag, 'application');
             $existingTagNames = \is_array($existingTags) ? $this->tagNames($existingTags) : [];
             $desiredTagNames = $this->applicationTags($profile, [], $tag);
             $missingTagNames = \array_values(\array_diff($desiredTagNames, $existingTagNames));
@@ -5192,7 +5192,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             if ($hasCustomCompose) {
                 $updatePayload['docker_compose_raw'] = $payload['docker_compose_raw'];
             }
-            $service = $client->request('PATCH', '/services/'.\rawurlencode($uuid), $updatePayload) + $service;
+            $service = $this->checkedResourceUpdate($service, $client->request('PATCH', '/services/'.\rawurlencode($uuid), $updatePayload), $uuid, $tag, 'service');
             $existingTagNames = \is_array($tags) ? $this->tagNames($tags) : [];
             $missingTagNames = \array_values(\array_diff([...$customTags, $tag, self::MARKER], $existingTagNames));
             if ($missingTagNames !== []) {
@@ -6429,6 +6429,29 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
             throw $exception;
         }
+    }
+
+    /** @param array<string, mixed> $known
+     *  @param array<string, mixed> $response
+     *  @return array<string, mixed>
+     */
+    private function checkedResourceUpdate(array $known, array $response, string $uuid, string $tag, string $kind): array
+    {
+        $identities = [];
+        if (\array_key_exists('uuid', $response)) $identities[] = $response['uuid'];
+        if (\is_array($response['data'] ?? null) && \array_key_exists('uuid', $response['data'])) {
+            $identities[] = $response['data']['uuid'];
+        }
+        foreach ($identities as $identity) {
+            if (! \is_string($identity) || $identity !== $uuid) {
+                throw new \RuntimeException("Coolify {$kind} update response identity does not match the requested resource.");
+            }
+        }
+        $updated = $this->validateScopedInventory([$response + $known], $tag, $kind)[0];
+        if (! $this->hasTag($updated, $tag) || ! $this->hasTag($updated, self::MARKER)) {
+            throw new \RuntimeException("Coolify {$kind} update response no longer has the expected scope ownership.");
+        }
+        return $updated;
     }
 
     /** @return array<string, mixed> */

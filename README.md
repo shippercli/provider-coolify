@@ -490,3 +490,16 @@ same ownership tag: they are no longer chosen or deleted by inference. Review
 those tags manually. These checks do not authenticate editable tags, confirm
 mutation responses or service runtime health, or lock resources after the read.
 Standalone low-level API operations remain caller-directed.
+
+### Application and service update responses
+
+After an automatic application/service PATCH, every supplied top-level or nested
+`data.uuid` must match the requested resource. Empty, null, conflicting or foreign
+identities stop follow-up operations. Acknowledgement-only responses retain the
+previously verified UUID. The merged response must still have readable metadata
+and the expected Shipper scope tags; explicit ownership loss is not ignored.
+
+This check occurs after the PATCH, which may already have changed the original
+resource. It prevents accepting an unexpected response identity for later
+operations; it is not transactional rollback or proof of the resource's runtime
+state. Create/database responses and other mutation surfaces remain under review.
