@@ -373,3 +373,14 @@ UUID ownership, malformed inventories/identities, and read failures return
 `blocked: true` with one public reason. Planning performs no writes. CLI
 enforcement is proposed in shippercli/cli#154. Other resources and deployment
 prerequisites remain subject to checks during apply.
+
+### Existing database declaration credentials
+
+Ordinary database declaration user/name/password values initialize new resources.
+They are not sent as implicit PATCH fields for existing tagged databases. Existing
+connection fields come from Coolify's known resource/details response; explicit
+`database_options` fields remain the opt-in update surface. A creation password
+is not substituted when an existing password is redacted. Supply missing connection
+values explicitly in the application environment; complete automatic delivery is
+not established when the API withholds those values. Live credential rotation and
+connection verification remain required for explicit credential updates.

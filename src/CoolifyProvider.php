@@ -5291,7 +5291,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                         ($providerOptions['migrate_volumes'] ?? true) === true,
                     );
                 }
-                $updateOptions = $effectiveCredentials;
+                $updateOptions = $providerOptions;
                 unset($updateOptions['instant_deploy'], $updateOptions['destination_uuid'], $updateOptions['migrate_volumes']);
                 if ($existingUuid !== '' && $updateOptions !== []) {
                     $client->request('PATCH', '/databases/'.\rawurlencode($existingUuid), $updateOptions);
@@ -5309,7 +5309,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                         // Sensitive-read permissions are optional; preserve the known resource data.
                     }
                 }
-                $details = \array_merge($details, $effectiveCredentials);
+                $details = \array_merge($details, $updateOptions);
                 if ($existingUuid !== '') {
                     $this->applyDatabaseEnvironmentVariables($client, $existingUuid, $project, $profile, $database['name']);
                 }
