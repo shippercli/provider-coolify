@@ -711,6 +711,12 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             }
         }
 
+        try {
+            $this->assertUniqueDatabaseNames($project, $profile);
+        } catch (\RuntimeException $exception) {
+            $errors[] = $exception->getMessage();
+        }
+
         return $errors;
     }
 
@@ -719,6 +725,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $name = $this->resourceName($project, $profile);
         $blocked = null;
         try {
+            $this->assertUniqueDatabaseNames($project, $profile);
             $client = $this->getClient();
             $app = $this->findApplication($client, $project, $profile);
             if ($app !== null && ($this->resourceUuid($app) === '' || ! \is_string($app['name'] ?? null) || $app['name'] === '')) {
@@ -5218,6 +5225,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
     private function applyDatabases(CoolifyApiClient $client, object $project, object $profile, string $projectUuid, string $environmentUuid, string $environmentName, string $serverUuid): array
     {
+        $this->assertUniqueDatabaseNames($project, $profile);
         $databases = $this->databaseDeclarations($project, $profile);
         $applicationEnvironment = [];
         $baseTag = $this->resourceTag($project, $profile);
@@ -5225,12 +5233,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $inventory = $this->list($client->request('GET', '/databases'));
         $wantedTags = [];
         foreach ($databases as $database) {
-            $logicalName = $this->interpolate($database['name'], $project, $profile);
-            $name = $this->slug($logicalName);
-            if (($pullRequestId = $this->pullRequestId($profile)) !== '') {
-                $suffix = '-pr-'.$pullRequestId;
-                $name = \substr($name, 0, 50 - \strlen($suffix)).$suffix;
-            }
+            $name = $this->databaseResourceName($database['name'], $project, $profile);
             $type = \strtolower($database['type']);
             $type = $type === 'postgresql' ? 'postgres' : $type;
             $user = $database['user'] !== '' ? $this->interpolate($database['user'], $project, $profile) : 'shipper';
@@ -5406,6 +5409,29 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
 
         return $applicationEnvironment;
+    }
+
+    private function databaseResourceName(string $name, object $project, object $profile): string
+    {
+        $name = $this->slug($this->interpolate($name, $project, $profile));
+        if (($pullRequestId = $this->pullRequestId($profile)) !== '') {
+            $suffix = '-pr-'.$pullRequestId;
+            $name = \substr($name, 0, 50 - \strlen($suffix)).$suffix;
+        }
+
+        return $name;
+    }
+
+    private function assertUniqueDatabaseNames(object $project, object $profile): void
+    {
+        $names = [];
+        foreach ($this->databaseDeclarations($project, $profile) as $database) {
+            $name = $this->databaseResourceName($database['name'], $project, $profile);
+            if (isset($names[$name])) {
+                throw new \RuntimeException('Coolify database names must remain unique after interpolation, normalization and preview truncation.');
+            }
+            $names[$name] = true;
+        }
     }
 
     /** @return list<array{name: string, type: string, user: string, password: string}> */
@@ -5749,8 +5775,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         if ($type === 'sqlite') {
             $environment['DB_CONNECTION'] ??= 'sqlite';
             $environment['DB_DATABASE'] ??= '/var/www/html/database/'.$name.'.sqlite';
-        } elseif ($type === 'mysql' || $type === 'mariadb' || $type === 'postgres') {
-            $environment['DB_CONNECTION'] ??= ($type === 'postgres' ? 'pgsql' : 'mysql');
+        } elseif (($type === 'mysql' || $type === 'mariadb' || $type === 'postgres') && ! \array_key_exists('DB_CONNECTION', $environment)) {
+            $environment['DB_CONNECTION'] = ($type === 'postgres' ? 'pgsql' : 'mysql');
             foreach (['host' => 'DB_HOST', 'port' => 'DB_PORT', 'database' => 'DB_DATABASE', 'username' => 'DB_USERNAME', 'password' => 'DB_PASSWORD'] as $key => $variable) {
                 if (! \array_key_exists($variable, $environment) && \is_string($config[$key] ?? null) && $config[$key] !== '') {
                     $environment[$variable] = $config[$key];

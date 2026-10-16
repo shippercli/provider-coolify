@@ -205,6 +205,14 @@ Coolify status reports the application's runtime status and filters Coolify's cu
 
 Coolify provider profile settings can also contain a `databases` list with `name`, `type`, optional `user`, and optional `password`. Core project database objects are merged with these entries by name; the profile entry takes precedence when names match.
 
+Database names must remain distinct after placeholder interpolation, slug
+normalization, the 50-character limit, and preview suffix truncation. Colliding
+declarations block validation and planning before API changes. Each database
+receives `SHIPPER_DB_<NORMALIZED_NAME>_*` connection variables. The default
+`DB_*` variables come from the first SQL/SQLite declaration; missing fields are
+not borrowed from another database. Check that the selected connection has all
+required values before using it in the application.
+
 To use Coolify's Doppler, Infisical, or Vault integration for the primary application, first create and validate its integration token in Coolify, then set `coolify.secret_manager.integration_token_uuid`. Optional provider-specific `settings` are passed through to Coolify. The integration token itself is never stored in `shipper.yml`:
 
 ~~~yaml
