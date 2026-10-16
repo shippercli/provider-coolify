@@ -587,3 +587,18 @@ and application log contents are unchanged. Field-level API error details are no
 longer included in these failure messages; inspect protected server diagnostics
 when that detail is needed. This covers client exception messages, not arbitrary
 application output or user-enabled engine traces.
+
+### Bounded rate-limit retries
+
+Automatic rate-limit retries apply only to GET, HEAD and OPTIONS with a valid
+numeric Retry-After of at most five seconds, for at most two retries. Each retry
+also has a small bounded jitter. Larger hints return the HTTP 429 error immediately
+with the requested delay, so a server hint cannot suspend the CLI for hours.
+Mutation requests and responses without a valid numeric hint are not retried.
+The configured timeout remains per HTTP attempt; it is not a total operation
+deadline across attempts and retry delays.
+
+The local HTTP retry regression checks two short GET retries, single-attempt POST,
+immediate long-hint failure and invalid-hint failure. The prior implementation
+hit the test's four-second subprocess cutoff while sleeping on a one-hour hint.
+No live account or mutation was used in this check.

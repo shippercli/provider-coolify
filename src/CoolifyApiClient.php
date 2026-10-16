@@ -6,6 +6,8 @@ namespace ShipperCli\ProviderCoolify;
 
 final class CoolifyApiClient
 {
+    private const MAX_AUTOMATIC_RETRY_DELAY_SECONDS = 5;
+
     /** @var (\Closure(string, string, array<string, mixed>|null): mixed)|null */
     private readonly ?\Closure $transport;
     /** @var (\Closure(string, string, array<string, mixed>, array<string, string>): mixed)|null */
@@ -241,13 +243,19 @@ final class CoolifyApiClient
         return new \RuntimeException("Coolify API request failed (HTTP {$status}): {$reason}.{$retry}");
     }
 
+    private function shouldRetry(string $method, int $status, ?int $delay, int $attempt): bool
+    {
+        return $status === 429 && \in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)
+            && $delay !== null && $delay >= 0 && $delay <= self::MAX_AUTOMATIC_RETRY_DELAY_SECONDS
+            && $attempt >= 0 && $attempt < 2;
+    }
+
     /**
      * @param array<int, mixed> $options
      * @return array{string, int, int|null}
      */
     private function executeRequest(string $method, string $path, array $options): array
     {
-        $safeToRetry = \in_array($method, ['GET', 'HEAD', 'OPTIONS'], true);
         for ($attempt = 0; ; $attempt++) {
             $retryAfter = null;
             $handle = \curl_init(\rtrim($this->baseUrl, '/').'/api/v1'.$path);
@@ -280,7 +288,7 @@ final class CoolifyApiClient
                 };
                 throw new \RuntimeException('Coolify API transport error: '.$reason.'.');
             }
-            if ($status !== 429 || ! $safeToRetry || $retryAfter === null || $attempt >= 2) {
+            if (! $this->shouldRetry($method, $status, $retryAfter, $attempt)) {
                 return [$responseBody, $status, $retryAfter];
             }
 

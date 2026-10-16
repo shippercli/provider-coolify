@@ -35,5 +35,7 @@ jobs:
         run: python3 tests/http/test_inventory_shapes.py
       - name: Verify HTTP error credential diagnostics
         run: python3 tests/http/test_error_diagnostics.py
+      - name: Verify bounded HTTP retries
+        run: python3 tests/http/test_retries.py
       - name: Audit dependencies
         run: composer audit --locked --no-interaction

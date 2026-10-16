@@ -78,4 +78,18 @@ final class CoolifyApiClientTest extends TestCase
         self::assertStringNotContainsString('synthetic-token', $failure->getMessage());
     }
 
+    public function testAutomaticRetryPolicyHasDelayMethodAndAttemptBounds(): void
+    {
+        $client = new CoolifyApiClient('https://example.test', 'synthetic');
+        $retry = new \ReflectionMethod($client, 'shouldRetry');
+        foreach ([['GET', 429, 0, 0], ['HEAD', 429, 5, 1], ['OPTIONS', 429, 1, 0]] as $arguments) {
+            self::assertTrue($retry->invoke($client, ...$arguments));
+        }
+        foreach ([['GET', 429, 6, 0], ['GET', 429, 3600, 0], ['GET', 429, null, 0],
+                  ['GET', 429, -1, 0], ['GET', 429, 0, 2], ['POST', 429, 0, 0],
+                  ['PATCH', 429, 0, 0], ['DELETE', 429, 0, 0], ['GET', 503, 0, 0]] as $arguments) {
+            self::assertFalse($retry->invoke($client, ...$arguments));
+        }
+    }
+
 }
