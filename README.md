@@ -384,3 +384,10 @@ is not substituted when an existing password is redacted. Supply missing connect
 values explicitly in the application environment; complete automatic delivery is
 not established when the API withholds those values. Live credential rotation and
 connection verification remain required for explicit credential updates.
+
+Explicit engine-specific credential fields supplied through `database_options`
+also take precedence when constructing application connection variables, even
+if Coolify returns an older `internal_db_url` after the update. URL-derived host,
+port and unspecified credentials remain available. This applies consistently to
+the primary `DB_*` variables and the per-database `SHIPPER_DB_*` variables.
+It does not verify that the running database has applied a credential change.

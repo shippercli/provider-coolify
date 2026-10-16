@@ -5317,7 +5317,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                     $this->applyDatabaseBackupOptions($client, $existingUuid, $project, $profile, $database['name']);
                     $this->applyDatabaseStorages($client, $existingUuid, $project, $profile, $database['name']);
                 }
-                $this->mergeDatabaseEnvironment($applicationEnvironment, $type, $name, $details, null, $user);
+                $this->mergeDatabaseEnvironment($applicationEnvironment, $type, $name, $details, null, $user, $updateOptions);
                 continue;
             }
             foreach ($inventory as $candidate) {
@@ -5392,7 +5392,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $effectivePassword = $passwordField !== null && \is_string($effectiveCredentials[$passwordField] ?? null)
                 ? $effectiveCredentials[$passwordField]
                 : $password;
-            $this->mergeDatabaseEnvironment($applicationEnvironment, $type, $name, $details, $effectivePassword, $user);
+            $this->mergeDatabaseEnvironment($applicationEnvironment, $type, $name, $details, $effectivePassword, $user, $effectiveCredentials);
         }
         foreach ($inventory as $database) {
             if ($this->hasDatabaseScopeTag($database, $scopeTag, false) && $this->hasTag($database, self::MARKER)) {
@@ -5734,7 +5734,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     }
 
     /** @param array<string, string> $environment */
-    private function mergeDatabaseEnvironment(array &$environment, string $type, string $name, array $database, ?string $generatedPassword, string $fallbackUser): void
+    private function mergeDatabaseEnvironment(array &$environment, string $type, string $name, array $database, ?string $generatedPassword, string $fallbackUser, array $credentialOverrides = []): void
     {
         $url = $database['internal_db_url'] ?? $database['internal_db_url_public'] ?? null;
         $config = [];
@@ -5772,6 +5772,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             : (\is_string($database[$databaseKey] ?? null) ? $database[$databaseKey] : $name);
         $config['host'] ??= $database['internal_db_host'] ?? $database['host'] ?? null;
         $config['port'] ??= isset($database['internal_db_port']) ? (string) $database['internal_db_port'] : null;
+        // Explicit API updates must not be replaced by a stale URL response.
+        foreach (['username' => $userKey, 'password' => $passwordKey, 'database' => $databaseKey] as $key => $field) {
+            if ($field !== null && \array_key_exists($field, $credentialOverrides)
+                && \is_string($credentialOverrides[$field])) {
+                $config[$key] = $credentialOverrides[$field];
+            }
+        }
         if ($type === 'sqlite') {
             $environment['DB_CONNECTION'] ??= 'sqlite';
             $environment['DB_DATABASE'] ??= '/var/www/html/database/'.$name.'.sqlite';

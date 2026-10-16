@@ -10,7 +10,7 @@ use ShipperCli\ProviderCoolify\CoolifyProvider;
 
 final class DatabaseCredentialPreservationTest extends TestCase
 {
-    private function applyExisting(string $type, array $options = [], bool $redactPassword = false): array
+    private function applyExisting(string $type, array $options = [], bool $redactPassword = false, array $extra = []): array
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
@@ -38,6 +38,7 @@ final class DatabaseCredentialPreservationTest extends TestCase
             'environment_uuid' => 'environment-1', 'server_uuid' => 'server-1',
             'internal_db_host' => 'database.internal', 'internal_db_port' => 3306,
             $keys[0] => 'existing_database', $keys[1] => 'existing_user', $keys[2] => 'existing-secret'];
+        $existing = array_merge($existing, $extra);
         if ($redactPassword) unset($existing[$keys[2]]);
         $calls = [];
         $client = new CoolifyApiClient('https://coolify.example.test', 'synthetic', transport:
@@ -71,6 +72,36 @@ final class DatabaseCredentialPreservationTest extends TestCase
         self::assertSame('existing_user', $environment['DB_USERNAME']);
         foreach ($calls as $call) self::assertNotSame('PATCH', $call[0]);
         self::assertNotContains('creation-secret', $environment);
+    }
+
+    public function testExplicitUpdatesTakePrecedenceOverStaleConnectionUrls(): void
+    {
+        foreach (['mysql', 'mariadb', 'postgres'] as $type) {
+            $keys = match ($type) {
+                'mysql' => ['mysql_user', 'mysql_password', 'mysql_database'],
+                'mariadb' => ['mariadb_user', 'mariadb_password', 'mariadb_database'],
+                'postgres' => ['postgres_user', 'postgres_password', 'postgres_db'],
+            };
+            $options = [$keys[0] => 'updated-user', $keys[1] => 'updated:@secret', $keys[2] => 'updated_database'];
+            [$calls, $environment] = $this->applyExisting($type, $options, false,
+                ['internal_db_url' => 'mysql://old-user:old-secret@database.internal:3306/old_database']);
+            self::assertSame('updated-user', $environment['DB_USERNAME'], $type);
+            self::assertSame('updated:@secret', $environment['DB_PASSWORD'], $type);
+            self::assertSame('updated_database', $environment['DB_DATABASE'], $type);
+            self::assertSame('database.internal', $environment['DB_HOST'], $type);
+            self::assertSame('updated:@secret', $environment['SHIPPER_DB_MAIN_PASSWORD'], $type);
+        }
+    }
+
+    public function testPasswordOnlyUpdatePreservesUrlPlacementAndUser(): void
+    {
+        [$calls, $environment] = $this->applyExisting('mysql', ['mysql_password' => 'explicit-secret'], false,
+            ['internal_db_url' => 'mysql://known-user:old-secret@known.internal:3307/known_database']);
+        self::assertSame('explicit-secret', $environment['DB_PASSWORD']);
+        self::assertSame('known-user', $environment['DB_USERNAME']);
+        self::assertSame('known_database', $environment['DB_DATABASE']);
+        self::assertSame('known.internal', $environment['DB_HOST']);
+        self::assertSame('3307', $environment['DB_PORT']);
     }
 
     public function testExplicitProviderCredentialOptionsRemainUpdates(): void
