@@ -1099,7 +1099,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
             return \array_values(\array_filter(\preg_split('/\r?\n/', $logs) ?: [], static fn (string $line): bool => $line !== ''));
         }
-        $subServiceName = $options['sub_service_name'] ?? null;
+        $subServiceName = $options['sub_service_name'] ?? $this->config['sub_service_name'] ?? null;
         if ($subServiceName !== null) {
             if ($this->pullRequestId($profile) !== '') {
                 throw new \InvalidArgumentException('Coolify PR preview logs cannot target sub_service_name because the separately managed Compose service remains shared with production.');

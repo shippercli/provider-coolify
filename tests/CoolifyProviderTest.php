@@ -198,6 +198,35 @@ final class CoolifyProviderTest extends TestCase
         self::assertSame(['started', 'ready'], $provider->logs($project, $profile));
     }
 
+    public function testProviderLevelSubServiceNameSelectsComposeServiceLogs(): void
+    {
+        $project = new class {
+            public function name(): string { return 'storefront'; }
+        };
+        $profile = new class {
+            public function name(): string { return 'production'; }
+            public function config(): array { return []; }
+        };
+        $tag = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
+        $provider = new CoolifyProvider(['sub_service_name' => 'worker'], new CoolifyApiClient(
+            'https://coolify.example.test',
+            'api-token',
+            transport: static function (string $method, string $path, ?array $body) use ($tag): array {
+                if ($path === '/services?tag='.rawurlencode($tag)) {
+                    return [['uuid' => 'managed-service-uuid', 'name' => 'storefront-production-stack',
+                        'tags' => [$tag, 'shippercli-managed']]];
+                }
+                if ($path === '/services/managed-service-uuid/logs?sub_service_name=worker&lines=100&show_timestamps=0') {
+                    return ['logs' => "started\nready\n"];
+                }
+
+                throw new \RuntimeException("Unexpected Coolify request: {$method} {$path}");
+            },
+        ));
+
+        self::assertSame(['started', 'ready'], $provider->logs($project, $profile));
+    }
+
     public function testDatabaseLogsResolveOnlyCurrentOwnedDatabase(): void
     {
         $project = new class {
