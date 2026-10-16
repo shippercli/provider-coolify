@@ -878,6 +878,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             }
             $this->reconcileAdditionalDestinations($applicationUuid, $this->profileOptions($profile)['additional_destination_uuids'] ?? $this->config['additional_destination_uuids'] ?? []);
             $databaseEnvironment = $this->applyDatabases($client, $project, $profile, $projectUuid, $environmentUuid, $environmentName, $serverUuid);
+            $databaseEnvironment = $this->completeDatabaseEnvironment($project, $profile, $databaseEnvironment);
             $this->applyEnvironment($client, $applicationUuid, $project, $profile, $databaseEnvironment);
             $this->applyStorages($client, $applicationUuid, $profile);
             if ($this->pullRequestId($profile) === '') {
@@ -4704,9 +4705,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             throw new \RuntimeException('Coolify preview_environment_variables must be a map of variable names to string values.');
         }
         $isPreview = $this->pullRequestId($profile) !== '';
-        $variables = $isPreview
-            ? \array_merge($databaseEnvironment, $previewVariables)
-            : \array_merge($databaseEnvironment, $this->environmentVariables($project, $profile));
+        $databaseEnvironment = $this->completeDatabaseEnvironment($project, $profile, $databaseEnvironment);
+        $variables = \array_merge($databaseEnvironment, $isPreview ? $previewVariables : $this->environmentVariables($project, $profile));
         $buildPack = $this->effectiveBuildPack($profile);
         if ($this->sourceType($profile) === 'git'
             && \method_exists($project, 'phpVersion') && \trim($project->phpVersion()) !== '') {
@@ -5317,7 +5317,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                     $this->applyDatabaseBackupOptions($client, $existingUuid, $project, $profile, $database['name']);
                     $this->applyDatabaseStorages($client, $existingUuid, $project, $profile, $database['name']);
                 }
-                $this->mergeDatabaseEnvironment($applicationEnvironment, $type, $name, $details, null, $user, $updateOptions);
+                $this->mergeDatabaseEnvironment($applicationEnvironment, $type, $name, $details, null, null, $updateOptions);
                 continue;
             }
             foreach ($inventory as $candidate) {
@@ -5734,7 +5734,65 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     }
 
     /** @param array<string, string> $environment */
-    private function mergeDatabaseEnvironment(array &$environment, string $type, string $name, array $database, ?string $generatedPassword, string $fallbackUser, array $credentialOverrides = []): void
+    /** @param array<string, string> $generated
+     *  @return array<string, string>
+     */
+    private function completeDatabaseEnvironment(object $project, object $profile, array $generated): array
+    {
+        $explicit = $this->pullRequestId($profile) !== ''
+            ? ($this->profileOptions($profile)['preview_environment_variables'] ?? $this->config['preview_environment_variables'] ?? [])
+            : $this->environmentVariables($project, $profile);
+        if (! \is_array($explicit)) {
+            throw new \RuntimeException('Coolify preview_environment_variables must be a map.');
+        }
+        $effective = \array_merge($generated, $explicit);
+        $primarySelected = false;
+        foreach ($this->databaseDeclarations($project, $profile) as $database) {
+            $type = \strtolower($database['type']);
+            if ($type === 'sqlite') {
+                $primarySelected = true;
+                continue;
+            }
+            if (! \in_array($type, ['mysql', 'mariadb', 'postgres', 'postgresql'], true)) {
+                continue;
+            }
+            $name = $this->databaseResourceName($database['name'], $project, $profile);
+            $prefix = 'SHIPPER_DB_'.\strtoupper(\preg_replace('/[^A-Za-z0-9]+/', '_', $name) ?? $name).'_';
+            $primary = ! $primarySelected;
+            $primarySelected = true;
+            $missing = [];
+            if ($primary && (! \is_string($effective['DB_CONNECTION'] ?? null) || $effective['DB_CONNECTION'] === '')) {
+                $missing[] = 'DB_CONNECTION';
+            }
+            foreach (['HOST', 'DATABASE', 'USERNAME', 'PASSWORD'] as $suffix) {
+                $key = $prefix.$suffix;
+                if ($primary) {
+                    $default = 'DB_'.$suffix;
+                    if (! \array_key_exists($default, $effective) && \is_string($effective[$key] ?? null)) {
+                        $generated[$default] = $effective[$key];
+                        $effective[$default] = $effective[$key];
+                    }
+                    if (! \is_string($effective[$default] ?? null)
+                        || ($suffix !== 'PASSWORD' && $effective[$default] === '')) {
+                        $missing[] = $default;
+                    }
+                    if (! \array_key_exists($key, $effective) && \is_string($effective[$default] ?? null)) {
+                        $generated[$key] = $effective[$default];
+                        $effective[$key] = $effective[$default];
+                    }
+                }
+                if (! \is_string($effective[$key] ?? null) || ($suffix !== 'PASSWORD' && $effective[$key] === '')) {
+                    $missing[] = $key;
+                }
+            }
+            if ($missing !== []) {
+                throw new \RuntimeException('Coolify SQL connection is incomplete; supply explicit application environment values for: '.\implode(', ', $missing));
+            }
+        }
+        return $generated;
+    }
+
+    private function mergeDatabaseEnvironment(array &$environment, string $type, string $name, array $database, ?string $generatedPassword, ?string $fallbackUser, array $credentialOverrides = []): void
     {
         $url = $database['internal_db_url'] ?? $database['internal_db_url_public'] ?? null;
         $config = [];
@@ -5769,7 +5827,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $config['password'] ??= $passwordKey !== null && \is_string($database[$passwordKey] ?? null) ? $database[$passwordKey] : $generatedPassword;
         $config['database'] ??= $databaseKey === null
             ? null
-            : (\is_string($database[$databaseKey] ?? null) ? $database[$databaseKey] : $name);
+            : (\is_string($database[$databaseKey] ?? null) ? $database[$databaseKey] : ($fallbackUser === null ? null : $name));
         $config['host'] ??= $database['internal_db_host'] ?? $database['host'] ?? null;
         $config['port'] ??= isset($database['internal_db_port']) ? (string) $database['internal_db_port'] : null;
         // Explicit API updates must not be replaced by a stale URL response.

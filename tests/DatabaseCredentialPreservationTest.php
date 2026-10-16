@@ -74,6 +74,15 @@ final class DatabaseCredentialPreservationTest extends TestCase
         self::assertNotContains('creation-secret', $environment);
     }
 
+    public function testUnknownExistingUserAndDatabaseAreNotFilledFromCreationDefaults(): void
+    {
+        [$calls, $environment] = $this->applyExisting('mysql', [], true,
+            ['mysql_user' => null, 'mysql_database' => null]);
+        self::assertArrayNotHasKey('DB_USERNAME', $environment);
+        self::assertArrayNotHasKey('DB_DATABASE', $environment);
+        self::assertArrayNotHasKey('DB_PASSWORD', $environment);
+    }
+
     public function testExplicitUpdatesTakePrecedenceOverStaleConnectionUrls(): void
     {
         foreach (['mysql', 'mariadb', 'postgres'] as $type) {

@@ -391,3 +391,22 @@ if Coolify returns an older `internal_db_url` after the update. URL-derived host
 port and unspecified credentials remain available. This applies consistently to
 the primary `DB_*` variables and the per-database `SHIPPER_DB_*` variables.
 It does not verify that the running database has applied a credential change.
+
+### Incomplete SQL connections
+
+Before application environment writes, SQL connections are checked after combining
+known database values with the application environment. The primary SQL connection
+requires `DB_CONNECTION`, `DB_HOST`, `DB_DATABASE`, `DB_USERNAME`, and a known
+`DB_PASSWORD` (an explicitly empty string is allowed). Each additional SQL database
+requires its own complete `SHIPPER_DB_<RESOLVED_NAME>_*` host/database/user/password
+values. Explicit primary values also complete missing primary namespaced fields.
+An additional database never borrows the primary password. Missing fields fail
+with variable names only, without displaying credentials.
+
+Preview checks use `preview_environment_variables`, never production environment
+values. Existing resources with hidden user/database/password fields need explicit
+values; creation defaults are not evidence of an existing connection. Earlier
+application reconciliation or database provisioning may already have occurred when
+this check fails. It prevents partial connection delivery, not all earlier changes,
+and does not establish successful database authentication. Non-SQL connection
+completeness and live application connection tests remain under review.
