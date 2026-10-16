@@ -60,4 +60,31 @@ final class DatabaseDeclarationMergeTest extends TestCase
             self::assertContains("Coolify database declaration 'main' field '{$field}' must be a string.", $errors);
         }
     }
+    public function testDuplicateProfileDeclarationsAreRejectedBeforeApiRequests(): void
+    {
+        $provider = new CoolifyProvider;
+        $profile = new class {
+            public function name(): string { return 'production'; }
+            public function config(): array { return ['coolify' => ['databases' => [
+                ['name' => 'main', 'type' => 'postgresql'],
+                ['name' => 'main', 'type' => 'mysql'],
+            ]]]; }
+        };
+        $message = 'Coolify profile database declarations must have unique names before merging with project declarations.';
+        self::assertContains($message, $provider->validate($this->project('postgresql'), $profile));
+        $plan = $provider->plan($this->project('postgresql'), $profile);
+        self::assertTrue($plan['blocked']);
+        $calls = [];
+        $client = new \ShipperCli\ProviderCoolify\CoolifyApiClient('https://example.test', 'synthetic', transport:
+            static function (...$args) use (&$calls): array { $calls[] = $args; return []; });
+        $failure = null;
+        try {
+            (new \ReflectionMethod($provider, 'applyDatabases'))->invoke($provider, $client,
+                $this->project('postgresql'), $profile, 'project', 'environment', 'production', 'server');
+        } catch (\RuntimeException $exception) { $failure = $exception; }
+        self::assertInstanceOf(\RuntimeException::class, $failure);
+        self::assertSame($message, $failure->getMessage());
+        self::assertSame([], $calls);
+    }
+
 }

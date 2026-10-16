@@ -619,3 +619,8 @@ checks YAML inheritance, PostgreSQL create payloads, and project/profile environ
 precedence in application requests against a fake API. The unit inheritance tests
 run in provider CI; this separate cross-checkout script was run locally against
 CLI commit aa3e6a7618a32f6d3a1deae6da481f6a56eea721. It performs no live deployment.
+
+Duplicate names within the profile database list/map are rejected before merging
+with project declarations. This prevents a later profile entry from silently
+replacing an earlier engine or credential choice. Validation reports the error;
+planning blocks and database reconciliation stops before any API request.

@@ -5497,6 +5497,23 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
     private function assertUniqueDatabaseNames(object $project, object $profile): void
     {
+        $profileNames = [];
+        $profileDatabases = $this->profileOptions($profile)['databases'] ?? [];
+        if (\is_array($profileDatabases)) {
+            foreach ($profileDatabases as $key => $database) {
+                if (! \is_array($database)) {
+                    continue;
+                }
+                $name = $database['name'] ?? (\is_string($key) ? $key : '');
+                if (! \is_string($name) || $name === '') {
+                    continue;
+                }
+                if (isset($profileNames[$name])) {
+                    throw new \RuntimeException('Coolify profile database declarations must have unique names before merging with project declarations.');
+                }
+                $profileNames[$name] = true;
+            }
+        }
         $names = [];
         foreach ($this->databaseDeclarations($project, $profile) as $database) {
             $name = $this->databaseResourceName($database['name'], $project, $profile);
