@@ -717,6 +717,26 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     public function plan(object $project, object $profile): array
     {
         $name = $this->resourceName($project, $profile);
+        $blocked = null;
+        try {
+            $client = $this->getClient();
+            $app = $this->findApplication($client, $project, $profile);
+            if ($app !== null && ($this->resourceUuid($app) === '' || ! \is_string($app['name'] ?? null) || $app['name'] === '')) {
+                throw new \RuntimeException('Coolify application identity is invalid.');
+            }
+            if ($app === null) {
+                foreach ($this->list($client->request('GET', '/applications')) as $candidate) {
+                    if ($this->resourceUuid($candidate) === '' || ! \is_string($candidate['name'] ?? null) || $candidate['name'] === '') {
+                        throw new \RuntimeException('Coolify application inventory contains an invalid identity.');
+                    }
+                    if (($candidate['name'] ?? null) === $name) {
+                        $blocked = 'An existing Coolify application with this name requires explicit project/profile ownership review and migration.';
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            $blocked = 'Unable to verify Coolify application ownership. Review API access and exact project/profile tags before deployment.';
+        }
         $actions = [
             'Resolve or create the Coolify project and profile environment',
             'Create or update the owned application '.$name,
@@ -811,8 +831,11 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             'repository' => $this->repositoryUrl($project),
             'branch' => $this->profileName($profile) !== '' && \method_exists($profile, 'branch') ? $profile->branch() : '',
             'domain' => $this->desiredDomains($project, $profile),
-            'actions' => $actions,
-            'note' => 'Coolify resources are tagged for safe adoption and cleanup; existing untagged resources are not deleted.',
+            'blocked' => $blocked !== null,
+            'actions' => $blocked === null ? $actions : ['BLOCKED: '.$blocked],
+            'note' => $blocked === null
+                ? 'Other resource prerequisites and ownership are rechecked during apply.'
+                : 'No deployment actions are authorized by this plan.',
         ];
     }
 
@@ -7209,11 +7232,16 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function list(array $response): array
     {
         $items = $response['data'] ?? $response['items'] ?? $response;
-        if (! \is_array($items)) {
-            return [];
+        if (! \is_array($items) || ! \array_is_list($items)) {
+            throw new \RuntimeException('Coolify returned an invalid resource inventory.');
+        }
+        foreach ($items as $item) {
+            if (! \is_array($item)) {
+                throw new \RuntimeException('Coolify returned an invalid resource inventory entry.');
+            }
         }
 
-        return \array_values(\array_filter($items, 'is_array'));
+        return $items;
     }
 
     private function hasTag(array $resource, string $tag): bool

@@ -356,3 +356,12 @@ in Coolify. Shipper does not automatically retag resources. A same-name applicat
 without matching scope blocks creation rather than creating a duplicate. Legacy
 resources are excluded from ownership-based listing and cleanup until migrated.
 Database cleanup accepts only the exact scope tag or a positive numeric PR suffix.
+
+### Plan ownership inspection
+
+Plan reads application inventory and verifies an explicit application's ownership
+when `application_uuid` is configured. Unowned same-name applications, mismatched
+UUID ownership, malformed inventories/identities, and read failures return
+`blocked: true` with one public reason. Planning performs no writes. CLI
+enforcement is proposed in shippercli/cli#154. Other resources and deployment
+prerequisites remain subject to checks during apply.

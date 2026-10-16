@@ -730,7 +730,7 @@ final class CoolifyProviderTest extends TestCase
             public function config(): array { return ['coolify' => $this->settings]; }
             public function get(string $key, mixed $default = null): mixed { return $this->settings[$key] ?? $default; }
         };
-        $provider = new CoolifyProvider;
+        $provider = new CoolifyProvider([], new CoolifyApiClient('https://coolify.example.test', 'token', transport: static fn (): array => []));
 
         self::assertContains(
             'Configure the Shipper deployment script as a Coolify post-deployment command',
@@ -765,7 +765,7 @@ final class CoolifyProviderTest extends TestCase
                 ];
             }
         };
-        $provider = new CoolifyProvider;
+        $provider = new CoolifyProvider([], new CoolifyApiClient('https://coolify.example.test', 'token', transport: static fn (): array => []));
         $actions = $provider->plan($project, $profile)['actions'];
 
         self::assertNotContains('Set Nixpacks PHP version to 8.3', $actions);
