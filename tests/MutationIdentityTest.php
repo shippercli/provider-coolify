@@ -46,6 +46,7 @@ final class MutationIdentityTest extends TestCase
                     $this->update($kind, $response, $calls);
                     self::fail('Conflicting mutation identity must be refused');
                 } catch (\RuntimeException $error) {
+                    self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $error);
                     self::assertStringContainsString('identity', $error->getMessage());
                 }
                 self::assertSame(['PATCH', '/'.$kind.'/owned'], end($calls));
@@ -62,6 +63,7 @@ final class MutationIdentityTest extends TestCase
                     $this->update($kind, $response, $calls);
                     self::fail('Invalid update metadata must be refused');
                 } catch (\RuntimeException $error) {
+                    self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $error);
                     self::assertStringContainsString('Coolify', $error->getMessage());
                 }
                 self::assertSame(['PATCH', '/'.$kind.'/owned'], end($calls));

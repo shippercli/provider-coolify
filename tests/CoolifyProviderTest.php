@@ -417,6 +417,7 @@ final class CoolifyProviderTest extends TestCase
             $deployResource->invoke($provider, $client, 'app-123', '42');
             self::fail('Expected a missing Coolify pull request preview to fail deployment.');
         } catch (\RuntimeException $exception) {
+            self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $exception);
             self::assertStringContainsString('Pull request 42 not found', $exception->getMessage());
         }
     }
@@ -2346,6 +2347,7 @@ final class CoolifyProviderTest extends TestCase
         } catch (\ReflectionException $exception) {
             throw $exception;
         } catch (\RuntimeException $exception) {
+            self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $exception);
             self::assertStringContainsString('refusing to convert', $exception->getMessage());
         }
         self::assertNotContains('PATCH', array_column($calls, 0));

@@ -36,6 +36,7 @@ final class ServiceOwnershipInventoryTest extends TestCase
                         'project', 'environment', 'production', 'server');
                     self::fail('Unsafe service inventory must not authorize mutation');
                 } catch (\RuntimeException $error) {
+                    self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $error);
                     self::assertStringContainsString('inventory', $error->getMessage());
                 }
                 foreach ($calls as $call) self::assertSame('GET', $call[0]);

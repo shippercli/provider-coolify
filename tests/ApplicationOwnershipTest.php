@@ -91,6 +91,7 @@ final class ApplicationOwnershipTest extends TestCase
             (new \ReflectionMethod($provider, 'ensureApplication'))->invoke($provider, $client, $this->named('api'), $this->named('preview'), 'project', 'environment', 'production', 'server', 'api-preview', null);
             self::fail('A same-name application must block creation.');
         } catch (\RuntimeException $exception) {
+            self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $exception);
             self::assertStringContainsString('duplicate', $exception->getMessage());
         }
         self::assertCount(2, $calls);
@@ -134,6 +135,7 @@ final class ApplicationOwnershipTest extends TestCase
                 (new \ReflectionMethod($provider, $method))->invoke($provider, $client, $this->named('api'), $profile, 'project', 'environment', 'production', 'server');
                 self::fail('Other ownership must block duplicate creation.');
             } catch (\RuntimeException $exception) {
+                self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $exception);
                 self::assertStringContainsString('ownership tags', $exception->getMessage());
             }
             self::assertNotEmpty($calls);
@@ -157,6 +159,7 @@ final class ApplicationOwnershipTest extends TestCase
                     (new \ReflectionMethod($provider, $method))->invokeArgs($provider, $args);
                     self::fail('An explicit UUID must not bypass ownership checks.');
                 } catch (\RuntimeException $exception) {
+                    self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $exception);
                     self::assertStringContainsString('ownership tags', $exception->getMessage());
                 }
             }

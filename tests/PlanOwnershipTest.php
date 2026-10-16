@@ -46,6 +46,7 @@ final class PlanOwnershipTest extends TestCase
                 $method->invoke($provider, $payload);
                 self::fail('Malformed inventory must not be accepted.');
             } catch (\RuntimeException $exception) {
+                self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $exception);
                 self::assertStringContainsString('invalid resource inventory', $exception->getMessage());
             }
         }

@@ -35,6 +35,7 @@ final class ApplicationLookupIdentityTest extends TestCase
                     'project', 'environment', 'production', 'server', 'storefront-production', null);
                 self::fail('Unsafe application lookup was accepted');
             } catch (\RuntimeException $error) {
+                self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $error);
                 self::assertStringContainsString('application', $error->getMessage());
             }
             foreach ($calls as $call) self::assertSame('GET', $call[0], $mode);

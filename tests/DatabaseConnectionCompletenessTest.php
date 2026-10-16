@@ -43,6 +43,7 @@ final class DatabaseConnectionCompletenessTest extends TestCase
                 (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', new \stdClass, $this->profile(), $partial);
                 self::fail('Incomplete SQL connection was accepted: '.$missing);
             } catch (\RuntimeException $error) {
+                self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $error);
                 self::assertStringContainsString($missing, $error->getMessage());
                 self::assertStringNotContainsString('synthetic', $error->getMessage());
             }

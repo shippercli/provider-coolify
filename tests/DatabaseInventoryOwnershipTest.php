@@ -38,6 +38,7 @@ final class DatabaseInventoryOwnershipTest extends TestCase
                     'project', 'environment', 'production', 'server');
                 self::fail('Ambiguous ownership must not authorize database changes');
             } catch (\RuntimeException $error) {
+                self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $error);
                 self::assertStringContainsString('database inventory', $error->getMessage());
             }
             self::assertSame([['GET', '/databases']], $calls);
@@ -73,6 +74,7 @@ final class DatabaseInventoryOwnershipTest extends TestCase
                 $validate->invoke($provider, $rows, $scope);
                 self::fail('Invalid inventory must be refused');
             } catch (\RuntimeException $error) {
+                self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $error);
                 self::assertStringContainsString('database inventory', $error->getMessage());
             }
         }
