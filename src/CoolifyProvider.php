@@ -753,6 +753,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $blocked = 'Unable to verify Coolify database inventory and ownership. Review API access and resource tags before deployment.';
             }
         }
+        if ($blocked === null && $this->pullRequestId($profile) === '') {
+            try {
+                $this->ownedServices($this->getClient(), $this->resourceTag($project, $profile));
+            } catch (\Throwable) {
+                $blocked = 'Unable to verify Coolify service inventory and ownership. Review API access and scope tags before deployment.';
+            }
+        }
         $actions = [
             'Resolve or create the Coolify project and profile environment',
             'Create or update the owned application '.$name,
@@ -5127,13 +5134,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $customTags = \is_array($serviceSettings) && \is_array($serviceSettings['tags'] ?? null)
             ? $this->tagNames($serviceSettings['tags'])
             : [];
-        $service = null;
-        foreach ($this->list($client->request('GET', '/services?tag='.\rawurlencode($tag))) as $candidate) {
-            if ($this->hasTag($candidate, $tag) && $this->hasTag($candidate, self::MARKER)) {
-                $service = $candidate;
-                break;
-            }
-        }
+        $owned = $this->ownedServices($client, $tag);
+        $service = $owned[0] ?? null;
         $payload = [
             'name' => $configuredName,
             'description' => \is_array($serviceSettings) && \is_string($serviceSettings['description'] ?? null)
@@ -5160,7 +5162,10 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         $isNewService = $service === null;
         if ($isNewService) {
-            foreach ($this->list($client->request('GET', '/services')) as $candidate) {
+            foreach ($this->validateServiceInventory($this->list($client->request('GET', '/services')), $tag) as $candidate) {
+                if ($this->hasTag($candidate, $tag) && $this->hasTag($candidate, self::MARKER)) {
+                    throw new \RuntimeException('Coolify service inventory disagrees with the scoped lookup; refusing duplicate creation.');
+                }
                 if (($candidate['name'] ?? null) === $configuredName) {
                     throw new \RuntimeException('Refusing to create a duplicate Coolify service without matching project/profile ownership tags. Review and migrate the existing service explicitly.');
                 }
@@ -6308,6 +6313,27 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
      */
     private function validateApplicationInventory(array $inventory, string $scope): array
     {
+        return $this->validateScopedInventory($inventory, $scope, 'application');
+    }
+
+    /** @param array<int, array<string, mixed>> $inventory
+     *  @return array<int, array<string, mixed>>
+     */
+    private function validateServiceInventory(array $inventory, string $scope): array
+    {
+        $inventory = $this->validateScopedInventory($inventory, $scope, 'service');
+        $owned = \array_filter($inventory, fn (array $row): bool => $this->hasTag($row, $scope) && $this->hasTag($row, self::MARKER));
+        if (\count($owned) > 1) {
+            throw new \RuntimeException('Coolify service inventory has multiple services claiming the same scope.');
+        }
+        return $inventory;
+    }
+
+    /** @param array<int, array<string, mixed>> $inventory
+     *  @return array<int, array<string, mixed>>
+     */
+    private function validateScopedInventory(array $inventory, string $scope, string $kind): array
+    {
         $seen = [];
         $names = [];
         foreach ($inventory as $index => $app) {
@@ -6316,19 +6342,19 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $rawTags = $app['tags'] ?? [];
             if (! \is_string($uuid) || $uuid === '' || $uuid !== \trim($uuid) || isset($seen[$uuid])
                 || ! \is_string($name) || \trim($name) === '' || ! \is_array($rawTags) || ! \array_is_list($rawTags)) {
-                throw new \RuntimeException('Coolify application inventory has invalid or duplicate identities.');
+                throw new \RuntimeException("Coolify {$kind} inventory has invalid or duplicate identities.");
             }
             $seen[$uuid] = true;
             $tags = [];
             foreach ($rawTags as $tag) {
                 if (\is_array($tag)) {
                     if (isset($tag['name'], $tag['tag']) && $tag['name'] !== $tag['tag']) {
-                        throw new \RuntimeException('Coolify application inventory has ambiguous tags.');
+                        throw new \RuntimeException("Coolify {$kind} inventory has ambiguous tags.");
                     }
                     $tag = $tag['name'] ?? $tag['tag'] ?? null;
                 }
                 if (! \is_string($tag) || $tag === '') {
-                    throw new \RuntimeException('Coolify application inventory has unreadable tags.');
+                    throw new \RuntimeException("Coolify {$kind} inventory has unreadable tags.");
                 }
                 $tags[] = $tag;
             }
@@ -6341,7 +6367,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $allOwners = \array_filter($tags, static fn (string $tag): bool =>
                 \preg_match('/\Ashippercli-[a-f0-9]{16}(?:-pr-[1-9][0-9]*)?\z/', $tag) === 1);
             if (\count($owned) !== 1 || \count($allOwners) !== 1 || isset($names[$owned[0]."\0".$name])) {
-                throw new \RuntimeException('Coolify application inventory has ambiguous ownership or names.');
+                throw new \RuntimeException("Coolify {$kind} inventory has ambiguous ownership or names.");
             }
             $names[$owned[0]."\0".$name] = true;
         }
@@ -6465,7 +6491,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function ownedServices(CoolifyApiClient $client, string $tag): array
     {
         return \array_values(\array_filter(
-            $this->list($client->request('GET', '/services?tag='.\rawurlencode($tag))),
+            $this->validateServiceInventory($this->list($client->request('GET', '/services?tag='.\rawurlencode($tag))), $tag),
             fn (array $service): bool => $this->hasTag($service, $tag) && $this->hasTag($service, self::MARKER),
         ));
     }

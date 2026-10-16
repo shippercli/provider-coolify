@@ -452,8 +452,8 @@ Database and selected service inventories are read before these application
 deletions; unavailable services or invalid selected service identities stop the
 operation first. API operations remain non-transactional, and a later deletion
 failure can still leave partial cleanup. Application creation/update lookups and shared explicit-ID reads also validate
-inventory/response identities before selecting a resource. Complete service
-ownership metadata validation remains under review.
+inventory/response identities before selecting a resource. Automatic service inventory ownership checks also run before reconciliation;
+mutation-response validation and live behavior remain under review.
 
 Preview cleanup now validates its parent identity and the complete returned worker
 inventory before deleting the preview endpoint. An explicit parent UUID must match
@@ -473,3 +473,20 @@ conflicting tags therefore stop before a PATCH or create request. A valid explic
 UUID may retain an arbitrary readable owned application name. These consistency
 checks do not authenticate tags, lock resources after the read, or validate every
 create/update response; live behavior and those remaining paths still need review.
+
+### Automatic service ownership inventory
+
+The provider manages one Compose/catalog service per project/profile scope.
+Service apply, removal, profile destroy, and shared status/log selection validate
+service UUID/name/tag metadata before choosing a resource. Conflicting Shipper
+scope claims, duplicate identities/names and multiple services claiming the same
+scope require explicit ownership review. A global service lookup that disagrees
+with an empty scoped lookup stops creation rather than creating another service.
+Normal profile plans also preflight services using read-only requests; explicit
+PR preview plans leave shared services unchanged.
+
+This is a compatibility change for profiles with multiple services carrying the
+same ownership tag: they are no longer chosen or deleted by inference. Review
+those tags manually. These checks do not authenticate editable tags, confirm
+mutation responses or service runtime health, or lock resources after the read.
+Standalone low-level API operations remain caller-directed.
