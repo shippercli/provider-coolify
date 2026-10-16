@@ -451,8 +451,9 @@ preview-worker cleanup. Preview IDs must fit a positive integer.
 Database and selected service inventories are read before these application
 deletions; unavailable services or invalid selected service identities stop the
 operation first. API operations remain non-transactional, and a later deletion
-failure can still leave partial cleanup. Application creation/update lookups and explicit-ID reads outside preview cleanup
-remain under review, as does complete service ownership metadata validation.
+failure can still leave partial cleanup. Application creation/update lookups and shared explicit-ID reads also validate
+inventory/response identities before selecting a resource. Complete service
+ownership metadata validation remains under review.
 
 Preview cleanup now validates its parent identity and the complete returned worker
 inventory before deleting the preview endpoint. An explicit parent UUID must match
@@ -463,3 +464,12 @@ cleanup before any preview/worker/database deletion. Shared tagged-application
 queries now use the application inventory validator, including identity, tag and
 managed-name ambiguity checks. These checks do not prevent concurrent changes
 after preflight or make later API deletion failures transactional.
+
+Explicit application reads used by discovery and update now require a readable
+owned UUID/name response whose UUID exactly matches the requested UUID. Tagged
+update searches and global same-name collision searches validate their returned
+inventories before selection. Duplicate managed names, invalid identities and
+conflicting tags therefore stop before a PATCH or create request. A valid explicit
+UUID may retain an arbitrary readable owned application name. These consistency
+checks do not authenticate tags, lock resources after the read, or validate every
+create/update response; live behavior and those remaining paths still need review.

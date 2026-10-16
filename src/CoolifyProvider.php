@@ -4502,10 +4502,9 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             : '';
         $app = null;
         if ($appUuid !== '') {
-            $app = $client->request('GET', '/applications/'.\rawurlencode($appUuid));
-            $this->assertApplicationOwnership($app, $tag);
+            $app = $this->readOwnedApplication($client, $appUuid, $tag);
         } else {
-            foreach ($this->list($client->request('GET', '/applications?tag='.\rawurlencode($tag))) as $candidate) {
+            foreach ($this->validateApplicationInventory($this->list($client->request('GET', '/applications?tag='.\rawurlencode($tag))), $tag) as $candidate) {
                 if (($candidate['name'] ?? null) === $name && $this->hasTag($candidate, $tag) && $this->hasTag($candidate, self::MARKER)) {
                     $app = $candidate;
                     break;
@@ -4514,7 +4513,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
 
         if ($app === null) {
-            foreach ($this->list($client->request('GET', '/applications')) as $candidate) {
+            foreach ($this->validateApplicationInventory($this->list($client->request('GET', '/applications')), $tag) as $candidate) {
                 if (($candidate['name'] ?? null) === $name) {
                     throw new \RuntimeException('Refusing to create a duplicate Coolify application: its name already exists without matching project/profile ownership tags. Review and migrate the existing application explicitly.');
                 }
@@ -6380,8 +6379,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     {
         $uuid = $this->profileOption($profile, 'application_uuid', $this->stringConfig('application_uuid'));
         if ($uuid !== '') {
-            $app = $client->request('GET', '/applications/'.\rawurlencode($uuid));
-            $this->assertApplicationOwnership($app, $this->resourceTag($project, $profile));
+            $app = $this->readOwnedApplication($client, $uuid, $this->resourceTag($project, $profile));
 
             return $app;
         }
@@ -6405,6 +6403,18 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
             throw $exception;
         }
+    }
+
+    /** @return array<string, mixed> */
+    private function readOwnedApplication(CoolifyApiClient $client, string $uuid, string $tag): array
+    {
+        $app = $client->request('GET', '/applications/'.\rawurlencode($uuid));
+        $this->assertApplicationOwnership($app, $tag);
+        $app = $this->validateApplicationInventory([$app], $tag)[0];
+        if ($app['uuid'] !== $uuid) {
+            throw new \RuntimeException('Coolify application identity does not match the requested UUID.');
+        }
+        return $app;
     }
 
     private function assertApplicationOwnership(array $app, string $tag): void
