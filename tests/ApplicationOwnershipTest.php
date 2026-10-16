@@ -53,11 +53,42 @@ final class ApplicationOwnershipTest extends TestCase
     public function testDatabaseCleanupRejectsMalformedPreviewTagSuffixes(): void
     {
         $client = new CoolifyApiClient('https://coolify.example.com', 'token', transport: static function (): array {
-            return array_map(static fn (string $suffix): array => ['uuid' => $suffix, 'tags' => ['shippercli-managed', 'scope'.$suffix]], ['', '-pr-42', '-pr-', '-pr-0', '-pr-no', '-pr-42-other']);
+            return array_map(static fn (string $suffix): array => ['uuid' => $suffix, 'tags' => ['shippercli-managed', 'scope'.$suffix]], ['', '-pr-42', '-db-0123456789', '-pr-42-db-0123456789', '-pr-', '-pr-0', '-pr-no', '-pr-42-other', '-db-invalid']);
         });
         $provider = new CoolifyProvider([], $client);
         $databases = (new \ReflectionMethod($provider, 'ownedDatabasesForProfile'))->invoke($provider, $client, 'scope');
-        self::assertSame(['', '-pr-42'], array_column($databases, 'uuid'));
+        self::assertSame(['', '-pr-42', '-db-0123456789', '-pr-42-db-0123456789'], array_column($databases, 'uuid'));
+        $exact = (new \ReflectionMethod($provider, 'ownedDatabases'))->invoke($provider, $client, 'scope');
+        self::assertSame(['', '-db-0123456789'], array_column($exact, 'uuid'));
+    }
+
+    public function testSameNameServicesAndDatabasesWithOtherOwnershipBlockCreation(): void
+    {
+        foreach (['applyCustomService', 'applyDatabases'] as $method) {
+            $calls = [];
+            $client = new CoolifyApiClient('https://coolify.example.com', 'token', transport: static function (string $verb, string $path, ?array $body) use (&$calls): array {
+                $calls[] = [$verb, $path];
+                return in_array($path, ['/services', '/databases'], true)
+                    ? [['uuid' => 'other', 'name' => 'primary', 'tags' => ['shippercli-managed', 'other-scope']]] : [];
+            });
+            $provider = new CoolifyProvider([
+                'docker_compose' => "services:\n  web:\n    image: nginx",
+                'service' => ['name' => 'primary'],
+                'databases' => [['name' => 'primary', 'type' => 'mysql']],
+            ], $client);
+            try {
+                $profile = new class {
+                    public function name(): string { return 'preview'; }
+                    public function config(): array { return ['coolify' => ['databases' => [['name' => 'primary', 'type' => 'mysql']]]]; }
+                };
+                (new \ReflectionMethod($provider, $method))->invoke($provider, $client, $this->named('api'), $profile, 'project', 'environment', 'production', 'server');
+                self::fail('Other ownership must block duplicate creation.');
+            } catch (\RuntimeException $exception) {
+                self::assertStringContainsString('ownership tags', $exception->getMessage());
+            }
+            self::assertNotEmpty($calls);
+            foreach ($calls as [$verb]) self::assertSame('GET', $verb);
+        }
     }
 
     public function testExplicitUuidCannotAdoptAnUnownedApplication(): void

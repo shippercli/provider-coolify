@@ -5106,6 +5106,11 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         $isNewService = $service === null;
         if ($isNewService) {
+            foreach ($this->list($client->request('GET', '/services')) as $candidate) {
+                if (($candidate['name'] ?? null) === $configuredName) {
+                    throw new \RuntimeException('Refusing to create a duplicate Coolify service without matching project/profile ownership tags. Review and migrate the existing service explicitly.');
+                }
+            }
             if (\is_string($serviceSettings['destination_uuid'] ?? null)) {
                 $payload['destination_uuid'] = $serviceSettings['destination_uuid'];
             }
@@ -5287,8 +5292,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 continue;
             }
             foreach ($inventory as $candidate) {
-                if (($candidate['name'] ?? null) === $name && ! $this->hasTag($candidate, self::MARKER)) {
-                    throw new \RuntimeException("Coolify database '{$name}' already exists without Shipper ownership tags.");
+                if (($candidate['name'] ?? null) === $name) {
+                    throw new \RuntimeException("Coolify database '{$name}' already exists without matching Shipper project/profile ownership tags.");
                 }
             }
             $password = $configuredPassword ?? \bin2hex(\random_bytes(24));
@@ -6181,7 +6186,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     {
         return \array_values(\array_filter(
             $this->list($client->request('GET', '/databases')),
-            fn (array $database): bool => $this->hasTag($database, $tag) && $this->hasTag($database, self::MARKER),
+            fn (array $database): bool => $this->hasDatabaseScopeTag($database, $tag, false) && $this->hasTag($database, self::MARKER),
         ));
     }
 
@@ -6194,24 +6199,26 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 if (! $this->hasTag($database, self::MARKER)) {
                     return false;
                 }
-                foreach ($this->tagNames($database['tags'] ?? []) as $tag) {
-                    if ($tag === $resourceTag) {
-                        return true;
-                    }
-                    if (\str_starts_with($tag, $resourceTag.'-pr-')) {
-                        $id = \substr($tag, \strlen($resourceTag.'-pr-'));
-                        if (\ctype_digit($id) && (int) $id > 0) {
-                            return true;
-                        }
-                    }
-                }
-
-                return false;
+                return $this->hasDatabaseScopeTag($database, $resourceTag, true);
             },
         ));
     }
 
     /** @return array<int, array<string, mixed>> */
+    private function hasDatabaseScopeTag(array $database, string $scope, bool $includePreviews): bool
+    {
+        $preview = $includePreviews ? '(?:-pr-([0-9]+))?' : '';
+        $pattern = '/\A'.preg_quote($scope, '/').$preview.'(?:-db-[a-f0-9]{10})?\z/';
+        foreach ($this->tagNames($database['tags'] ?? []) as $tag) {
+            if (preg_match($pattern, $tag, $matches) === 1
+                && (! isset($matches[1]) || (int) $matches[1] > 0)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function ownedServices(CoolifyApiClient $client, string $tag): array
     {
         return \array_values(\array_filter(
