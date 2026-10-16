@@ -410,3 +410,8 @@ application reconciliation or database provisioning may already have occurred wh
 this check fails. It prevents partial connection delivery, not all earlier changes,
 and does not establish successful database authentication. Non-SQL connection
 completeness and live application connection tests remain under review.
+
+Connection URL usernames, passwords and database paths are URL-decoded exactly
+once when converted to environment variables. Literal values returned in separate
+API fields are not URL-decoded. Plus signs remain plus signs; encoded percent
+characters are not decoded a second time.

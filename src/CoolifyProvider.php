@@ -5802,7 +5802,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $config = [
                     'host' => $parts['host'] ?? null,
                     'port' => isset($parts['port']) ? (string) $parts['port'] : null,
-                    'database' => isset($parts['path']) ? \ltrim($parts['path'], '/') : null,
+                    'database' => isset($parts['path']) ? \rawurldecode(\ltrim($parts['path'], '/')) : null,
                     'username' => isset($parts['user']) ? \rawurldecode($parts['user']) : null,
                     'password' => isset($parts['pass']) ? \rawurldecode($parts['pass']) : null,
                 ];
