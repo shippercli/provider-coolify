@@ -1621,9 +1621,12 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $backupUuid = $declaredDatabases[$databaseName];
                 $executions = $this->databaseBackupExecutions($databaseUuid, $backupUuid);
                 $status['backup_uuid'] = $backupUuid;
-                $status['backup_executions'] = \is_array($executions['executions'] ?? null)
-                    ? $executions['executions']
-                    : $executions;
+                $rows = \array_key_exists('executions', $executions) ? $executions['executions'] : $executions;
+                if (! \is_array($rows) || ! \array_is_list($rows)
+                    || \array_filter($rows, static fn (mixed $row): bool => ! \is_array($row)) !== []) {
+                    throw new \RuntimeException('Coolify backup execution status is unreadable.');
+                }
+                $status['backup_executions'] = \array_map(fn (array $execution): array => $this->statusRecordSummary($execution), $rows);
             }
             $databaseStatuses[] = $status;
         }

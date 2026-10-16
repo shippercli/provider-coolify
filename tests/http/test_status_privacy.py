@@ -23,6 +23,12 @@ class StatusPrivacyTest(unittest.TestCase):
                 data = []
                 if self.path == '/api/v1/applications/app-1':
                     data = {'uuid': 'app-1', 'id': 1, 'name': 'fixture', 'status': 'running', 'tags': ['shippercli-managed', scope]}
+                elif self.path == '/api/v1/databases':
+                    data = [{'uuid': 'db-1', 'name': 'main', 'type': 'mysql', 'tags': ['shippercli-managed', scope + '-db-0123456789']}]
+                elif self.path == '/api/v1/databases/db-1':
+                    data = {'uuid': 'db-1', 'name': 'main', 'type': 'mysql', 'status': 'running'}
+                elif self.path == '/api/v1/databases/db-1/backups/backup-1/executions':
+                    data = {'executions': [{'uuid': 'backup-execution-1', 'status': 'success', 'output': 'synthetic-status-secret', 'credentials': {'token': 'synthetic-status-secret'}}]}
                 elif self.path == '/api/v1/applications/app-1/scheduled-tasks':
                     data = [{'uuid': 'task-1', 'name': task_prefix + 'nightly', 'command': 'echo synthetic-status-secret', 'frequency': 'daily', 'enabled': True}]
                 elif self.path == '/api/v1/applications/app-1/scheduled-tasks/task-1/executions':

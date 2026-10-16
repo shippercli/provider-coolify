@@ -734,3 +734,9 @@ execution records to scalar identifiers, state and timestamps. Commands can embe
 credentials, and raw execution output can contain application secrets. Explicit
 scheduled-task configuration/output API methods retain their existing behavior;
 this privacy boundary applies to CLI-visible status summaries.
+
+Database backup execution records in status use the same summary boundary. Raw
+output and extra credential-bearing fields are omitted, and malformed execution
+lists are refused with a fixed diagnostic. Both direct lists and the existing
+`executions` wrapper are supported. Explicit backup execution/output API methods
+are unchanged.

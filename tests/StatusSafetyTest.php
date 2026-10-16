@@ -51,4 +51,45 @@ final class StatusSafetyTest extends TestCase
         ]));
     }
 
+    public function testBackupExecutionStatusDoesNotEchoRawOutput(): void
+    {
+        $scope = 'shippercli-'.substr(hash('sha256', json_encode(['fixture', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
+        foreach ([false, true, 'null', 'assoc', 'scalar'] as $wrapped) {
+            $client = new CoolifyApiClient('https://coolify.example.test', 'synthetic-token', transport: static function (string $method, string $path) use ($scope, $wrapped): array {
+                self::assertSame('GET', $method);
+                if ($path === '/databases') return [['uuid' => 'db-1', 'name' => 'main', 'type' => 'mysql', 'tags' => ['shippercli-managed', $scope.'-db-0123456789']]];
+                if ($path === '/databases/db-1') return ['uuid' => 'db-1', 'name' => 'main', 'type' => 'mysql', 'status' => 'running'];
+                if ($path === '/databases/db-1/backups/backup-1/executions') {
+                    if ($wrapped === 'null') return ['executions' => null];
+                    if ($wrapped === 'assoc') return ['executions' => ['token' => 'synthetic-backup-secret']];
+                    if ($wrapped === 'scalar') return ['executions' => ['synthetic-backup-secret']];
+                    $rows = [['uuid' => 'backup-execution-1', 'status' => 'success', 'output' => 'synthetic-backup-secret', 'credentials' => ['token' => 'synthetic-backup-secret']]];
+                    return $wrapped ? ['executions' => $rows] : $rows;
+                }
+                throw new \RuntimeException('Unexpected backup status request');
+            });
+            $project = new class {
+                public function name(): string { return 'fixture'; }
+                public function databases(): array { return [new class { public function name(): string { return 'main'; } }]; }
+            };
+            $profile = new class {
+                public function name(): string { return 'production'; }
+                public function config(): array { return []; }
+            };
+            $provider = new CoolifyProvider(['database_backups' => ['main' => ['uuid' => 'backup-1']]], $client);
+            $failure = null;
+            $result = null;
+            try { $result = (new \ReflectionMethod($provider, 'standaloneDatabaseStatuses'))->invoke($provider, $project, $profile, ''); }
+            catch (\RuntimeException $error) { $failure = $error; }
+            if (is_string($wrapped)) {
+                self::assertInstanceOf(\RuntimeException::class, $failure);
+                self::assertSame('Coolify backup execution status is unreadable.', $failure->getMessage());
+                continue;
+            }
+            self::assertNull($failure);
+            self::assertStringNotContainsString('synthetic-backup-secret', json_encode($result, JSON_THROW_ON_ERROR));
+            self::assertSame(['uuid' => 'backup-execution-1', 'status' => 'success'], $result[0]['backup_executions'][0]);
+        }
+    }
+
 }
