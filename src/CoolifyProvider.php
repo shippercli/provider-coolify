@@ -1429,6 +1429,17 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         );
     }
 
+    /** @param array<string, mixed>|null $deployment @return array<string, mixed>|null */
+    private function deploymentStatusSummary(?array $deployment): ?array
+    {
+        if ($deployment === null) return null;
+        $fields = \array_flip(['id', 'uuid', 'deployment_uuid', 'application_id', 'status',
+            'pull_request_id', 'created_at', 'updated_at', 'started_at', 'finished_at', 'ended_at']);
+
+        return \array_filter(\array_intersect_key($deployment, $fields),
+            static fn (mixed $value): bool => $value === null || \is_string($value) || \is_int($value));
+    }
+
     public function status(object $project, object $profile): array
     {
         $app = $this->findApplication($this->getClient(), $project, $profile);
@@ -1492,7 +1503,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 'uuid' => $workerUuid,
                 'name' => $name,
                 'status' => $worker['status'] ?? $worker['application_status'] ?? null,
-                'latest_deployment' => $workerDeployments[0] ?? null,
+                'latest_deployment' => $this->deploymentStatusSummary($workerDeployments[0] ?? null),
             ];
         }
         $serviceStatus = null;
@@ -1521,9 +1532,9 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             'name' => $application['name'] ?? $app['name'] ?? null,
             'status' => $application['status'] ?? $application['application_status'] ?? null,
             'domains' => $application['fqdn'] ?? $application['domains'] ?? [],
-            'running_deployments' => $deployments,
-            'latest_deployment' => $deploymentHistory[0] ?? null,
-            'deployment_history' => $deploymentHistory,
+            'running_deployments' => \array_map(fn (array $deployment): array => $this->deploymentStatusSummary($deployment), $deployments),
+            'latest_deployment' => $this->deploymentStatusSummary($deploymentHistory[0] ?? null),
+            'deployment_history' => \array_map(fn (array $deployment): array => $this->deploymentStatusSummary($deployment), $deploymentHistory),
             'rollback_images' => $this->applicationRollbackImages($uuid),
             'scheduled_tasks' => $this->scheduledTaskStatuses('applications', $uuid, $project, $profile),
             'workloads' => $workloads,
@@ -1638,7 +1649,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 'uuid' => $uuid,
                 'name' => $name,
                 'status' => $worker['status'] ?? $worker['application_status'] ?? null,
-                'latest_deployment' => $history[0] ?? null,
+                'latest_deployment' => $this->deploymentStatusSummary($history[0] ?? null),
             ];
         }
         $serviceStatus = null;

@@ -718,3 +718,13 @@ are not expanded inside values that may contain secrets. Existing managed keys
 still update, new keys still create, explicitly empty strings are retained, and
 only stale variables marked as Shipper-managed are removed. Configurations that
 used provider macros in these values must supply their intended resolved values.
+
+### Deployment records in status output
+
+Public status summarizes running/history/latest deployment records, including
+worker deployment summaries. Only scalar IDs, state, pull-request identity and
+timestamps are retained. Raw logs, environment fields and unknown extra fields
+are omitted because CLI status prints its result as JSON. Consumers depending
+on raw deployment fields in status must use the appropriate explicit API method
+and handle secret-bearing responses separately. This change does not sanitize
+all low-level API methods or establish deployment/application health.
