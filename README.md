@@ -437,3 +437,20 @@ overflowing preview IDs are not treated as owned previews.
 This does not authenticate manually editable tags, prevent changes after a read,
 or validate every non-database resource inventory. Shared resource concurrency,
 other prerequisite checks, migration review and live operation remain unfinished.
+
+### Profile application cleanup inventory
+
+Profile destroy now reads the full application inventory once and validates
+UUIDs, names and tags before deletion. It rejects duplicate UUIDs, duplicate names
+within a managed scope, unreadable tags and conflicting Shipper scope claims.
+Production applications/workers and eligible preview workers are collected into
+a unique target set, so an application is not deleted twice through overlapping
+scope queries. Preview applications themselves remain excluded from profile
+preview-worker cleanup. Preview IDs must fit a positive integer.
+
+Database and selected service inventories are read before these application
+deletions; unavailable services or invalid selected service identities stop the
+operation first. API operations remain non-transactional, and a later deletion
+failure can still leave partial cleanup. This does not yet extend application
+inventory validation to every preview, apply, status or log lookup, or validate
+all service ownership metadata. Those paths remain under review.
