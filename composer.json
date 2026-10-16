@@ -21,5 +21,16 @@
   },
   "extra": {
     "shipper-plugin": "ShipperCli\\ProviderCoolify\\CoolifyPlugin"
+  },
+  "archive": {
+    "exclude": [
+      "/vendor",
+      "/tests",
+      "/.github",
+      "/.env*",
+      "/auth.json",
+      "/.phpunit*",
+      "/phpunit.xml*"
+    ]
   }
 }
