@@ -1,6 +1,7 @@
 """Verify Composer/Git exports and load runtime classes from the extracted package."""
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import zipfile
@@ -11,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def check_archive(path):
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
-        forbidden = [name for name in names if name.split('/')[0] in {'vendor', 'tests', '.github'}
+        forbidden = [name for name in names if any(part in {'vendor', 'node_modules', 'tests', '.github', 'builds'} for part in Path(name).parts)
                      or name.split('/')[0].startswith(('.phpunit', 'phpunit.xml'))
                      or Path(name).name.startswith('.env') or Path(name).name == 'auth.json']
         if forbidden:
@@ -25,7 +26,15 @@ def check_archive(path):
 
 with tempfile.TemporaryDirectory(prefix='shipper-provider-package-') as directory:
     work = Path(directory)
-    subprocess.run(['composer', 'archive', '--format=zip', '--file=provider', '--dir=' + directory], cwd=ROOT, capture_output=True, text=True, check=True)
+    source = work / 'source'
+    shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns('.git', 'vendor', 'node_modules', 'builds', '.env*', 'auth.json', '__pycache__'))
+    for name in ['nested/vendor/synthetic.php', 'nested/node_modules/synthetic.js',
+                 'nested/.env', 'nested/auth.json', 'builds/synthetic']:
+        target = source / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({'http-basic': {'example.invalid': {'username': 'synthetic', 'password': 'synthetic'}}})
+                          if target.name == 'auth.json' else 'synthetic-excluded-marker')
+    subprocess.run(['composer', 'archive', '--format=zip', '--file=provider', '--dir=' + directory], cwd=source, capture_output=True, text=True, check=True)
     composer_count = check_archive(work / 'provider.zip')
     subprocess.run(['git', 'archive', '--worktree-attributes', '--format=zip', '--output=' + str(work / 'git.zip'), 'HEAD'], cwd=ROOT, check=True)
     git_count = check_archive(work / 'git.zip')
