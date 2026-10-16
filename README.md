@@ -728,3 +728,9 @@ are omitted because CLI status prints its result as JSON. Consumers depending
 on raw deployment fields in status must use the appropriate explicit API method
 and handle secret-bearing responses separately. This change does not sanitize
 all low-level API methods or establish deployment/application health.
+
+Scheduled-task status similarly omits configured command strings and summarizes
+execution records to scalar identifiers, state and timestamps. Commands can embed
+credentials, and raw execution output can contain application secrets. Explicit
+scheduled-task configuration/output API methods retain their existing behavior;
+this privacy boundary applies to CLI-visible status summaries.

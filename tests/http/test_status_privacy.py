@@ -12,6 +12,7 @@ class StatusPrivacyTest(unittest.TestCase):
     def test_deployment_summaries(self):
         calls = []
         scope = 'shippercli-' + hashlib.sha256(b'["fixture","production"]').hexdigest()[:16]
+        task_prefix = 'shipper-' + hashlib.sha256(b'["fixture","production"]').hexdigest()[:10] + '-'
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *_args):
@@ -22,6 +23,10 @@ class StatusPrivacyTest(unittest.TestCase):
                 data = []
                 if self.path == '/api/v1/applications/app-1':
                     data = {'uuid': 'app-1', 'id': 1, 'name': 'fixture', 'status': 'running', 'tags': ['shippercli-managed', scope]}
+                elif self.path == '/api/v1/applications/app-1/scheduled-tasks':
+                    data = [{'uuid': 'task-1', 'name': task_prefix + 'nightly', 'command': 'echo synthetic-status-secret', 'frequency': 'daily', 'enabled': True}]
+                elif self.path == '/api/v1/applications/app-1/scheduled-tasks/task-1/executions':
+                    data = [{'uuid': 'execution-1', 'status': 'success', 'created_at': '2026-10-16T12:00:00Z', 'output': 'synthetic-status-secret', 'extra': {'token': 'synthetic-status-secret'}}]
                 elif self.path == '/api/v1/deployments' or self.path.startswith('/api/v1/deployments/applications/app-1?'):
                     data = [{'deployment_uuid': 'deployment-1', 'application_id': 1, 'status': 'finished',
                              'created_at': '2026-10-16T12:00:00Z', 'logs': 'DB_PASSWORD=synthetic-status-secret',

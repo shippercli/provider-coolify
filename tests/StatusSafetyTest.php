@@ -13,9 +13,12 @@ final class StatusSafetyTest extends TestCase
     public function testPublicStatusDoesNotEchoDeploymentLogsOrExtraSecretFields(): void
     {
         $scope = 'shippercli-'.substr(hash('sha256', json_encode(['fixture', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
-        $client = new CoolifyApiClient('https://coolify.example.test', 'synthetic-token', transport: static function (string $method, string $path) use ($scope): array {
+        $taskPrefix = 'shipper-'.substr(hash('sha256', json_encode(['fixture', 'production'], JSON_THROW_ON_ERROR)), 0, 10).'-';
+        $client = new CoolifyApiClient('https://coolify.example.test', 'synthetic-token', transport: static function (string $method, string $path) use ($scope, $taskPrefix): array {
             self::assertSame('GET', $method);
             if ($path === '/applications/app-1') return ['uuid' => 'app-1', 'id' => 1, 'name' => 'fixture', 'status' => 'running', 'tags' => ['shippercli-managed', $scope]];
+            if ($path === '/applications/app-1/scheduled-tasks') return [['uuid' => 'task-1', 'name' => $taskPrefix.'nightly', 'command' => 'echo synthetic-status-secret', 'frequency' => 'daily', 'enabled' => true]];
+            if ($path === '/applications/app-1/scheduled-tasks/task-1/executions') return [['uuid' => 'execution-1', 'status' => 'success', 'created_at' => '2026-10-16T12:00:00Z', 'output' => 'synthetic-status-secret', 'extra' => ['token' => 'synthetic-status-secret']]];
             if ($path === '/deployments' || str_starts_with($path, '/deployments/applications/app-1?')) return [[
                 'deployment_uuid' => 'deployment-1', 'application_id' => 1, 'status' => 'finished',
                 'created_at' => '2026-10-16T12:00:00Z', 'logs' => 'DB_PASSWORD=synthetic-status-secret',
@@ -33,11 +36,13 @@ final class StatusSafetyTest extends TestCase
         self::assertSame('deployment-1', $status['latest_deployment']['deployment_uuid']);
         self::assertSame('finished', $status['deployment_history'][0]['status']);
         self::assertSame('deployment-1', $status['running_deployments'][0]['deployment_uuid']);
+        self::assertSame('execution-1', $status['scheduled_tasks'][0]['latest_execution']['uuid']);
+        self::assertArrayNotHasKey('command', $status['scheduled_tasks'][0]);
     }
     public function testDeploymentSummaryDropsUnknownFieldsAndNestedValues(): void
     {
         $provider = new CoolifyProvider;
-        $method = new \ReflectionMethod($provider, 'deploymentStatusSummary');
+        $method = new \ReflectionMethod($provider, 'statusRecordSummary');
         self::assertNull($method->invoke($provider, null));
         self::assertSame(['deployment_uuid' => 'deployment-1', 'created_at' => null], $method->invoke($provider, [
             'deployment_uuid' => 'deployment-1', 'created_at' => null,

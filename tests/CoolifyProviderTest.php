@@ -2052,7 +2052,6 @@ final class CoolifyProviderTest extends TestCase
         self::assertSame([[
             'uuid' => 'task-1',
             'name' => $prefix.'nightly',
-            'command' => 'php artisan backup',
             'frequency' => 'daily',
             'enabled' => true,
             'container' => null,
