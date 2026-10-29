@@ -1,0 +1,231 @@
+<?php
+
+declare(strict_types=1);
+
+namespace ShipperCli\ProviderCoolify\Tests;
+
+use PHPUnit\Framework\TestCase;
+use ShipperCli\ProviderCoolify\CoolifyApiClient;
+use ShipperCli\ProviderCoolify\CoolifyProvider;
+
+final class DatabaseConnectionCompletenessTest extends TestCase
+{
+    private function profile(array $explicit = [], array $databases = [['name' => 'main', 'type' => 'mysql']], bool $preview = false): object
+    {
+        return new class($explicit, $databases, $preview) {
+            public function __construct(private array $explicit, private array $databases, private bool $preview) {}
+            public function name(): string { return 'production'; }
+            public function config(): array {
+                return ['coolify' => ['databases' => $this->databases,
+                    ...($this->preview ? ['pull_request_id' => '42', 'preview_environment_variables' => $this->explicit] : [])]];
+            }
+            public function environment(): object {
+                return new class($this->preview ? [] : $this->explicit) {
+                    public function __construct(private array $values) {}
+                    public function variables(): array { return $this->values; }
+                };
+            }
+        };
+    }
+
+    public function testMissingPrimarySqlFieldsStopBeforeApplicationApiCalls(): void
+    {
+        $complete = ['DB_CONNECTION' => 'mysql', 'DB_HOST' => 'db.internal', 'DB_DATABASE' => 'main', 'DB_USERNAME' => 'user', 'DB_PASSWORD' => 'synthetic'];
+        foreach (['DB_CONNECTION', 'DB_HOST', 'DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD'] as $missing) {
+            $calls = [];
+            $client = new CoolifyApiClient('https://example.test', 'synthetic', transport: static function ($method, $path, $body) use (&$calls): array {
+                $calls[] = [$method, $path, $body]; return [];
+            });
+            $partial = $complete;
+            unset($partial[$missing]);
+            $provider = new CoolifyProvider;
+            try {
+                (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', new \stdClass, $this->profile(), $partial);
+                self::fail('Incomplete SQL connection was accepted: '.$missing);
+            } catch (\RuntimeException $error) {
+                self::assertNotInstanceOf(\PHPUnit\Framework\AssertionFailedError::class, $error);
+                self::assertStringContainsString($missing, $error->getMessage());
+                self::assertStringNotContainsString('synthetic', $error->getMessage());
+            }
+            self::assertSame([], $calls);
+        }
+    }
+
+    public function testExplicitValuesCompletePrimaryConnectionAndNamedVariables(): void
+    {
+        $provider = new CoolifyProvider;
+        $result = (new \ReflectionMethod($provider, 'completeDatabaseEnvironment'))->invoke($provider, new \stdClass,
+            $this->profile(['DB_HOST' => 'explicit.internal', 'DB_PASSWORD' => 'explicit-secret']),
+            ['DB_CONNECTION' => 'mysql', 'DB_DATABASE' => 'main', 'DB_USERNAME' => 'user']);
+        self::assertSame('explicit.internal', $result['SHIPPER_DB_MAIN_HOST']);
+        self::assertSame('explicit-secret', $result['SHIPPER_DB_MAIN_PASSWORD']);
+    }
+
+    public function testAdditionalSqlConnectionCannotBorrowDefaultPassword(): void
+    {
+        $provider = new CoolifyProvider;
+        $profile = $this->profile([], [['name' => 'main', 'type' => 'mysql'], ['name' => 'reports', 'type' => 'postgres']]);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('SHIPPER_DB_REPORTS_PASSWORD');
+        (new \ReflectionMethod($provider, 'completeDatabaseEnvironment'))->invoke($provider, new \stdClass, $profile,
+            ['DB_CONNECTION' => 'mysql', 'DB_HOST' => 'main.internal', 'DB_DATABASE' => 'main', 'DB_USERNAME' => 'main', 'DB_PASSWORD' => 'main-secret',
+                'SHIPPER_DB_REPORTS_HOST' => 'reports.internal', 'SHIPPER_DB_REPORTS_DATABASE' => 'reports', 'SHIPPER_DB_REPORTS_USERNAME' => 'reporter']);
+    }
+
+    public function testCompleteAdditionalSqlConnectionKeepsItsOwnPassword(): void
+    {
+        $provider = new CoolifyProvider;
+        $generated = ['DB_CONNECTION' => 'mysql', 'DB_HOST' => 'main.internal', 'DB_DATABASE' => 'main', 'DB_USERNAME' => 'main', 'DB_PASSWORD' => 'main-secret',
+            'SHIPPER_DB_REPORTS_HOST' => 'reports.internal', 'SHIPPER_DB_REPORTS_DATABASE' => 'reports',
+            'SHIPPER_DB_REPORTS_USERNAME' => 'reporter', 'SHIPPER_DB_REPORTS_PASSWORD' => 'reports-secret'];
+        $result = (new \ReflectionMethod($provider, 'completeDatabaseEnvironment'))->invoke($provider, new \stdClass,
+            $this->profile([], [['name' => 'main', 'type' => 'mysql'], ['name' => 'reports', 'type' => 'postgres']]), $generated);
+        self::assertSame('main-secret', $result['DB_PASSWORD']);
+        self::assertSame('reports-secret', $result['SHIPPER_DB_REPORTS_PASSWORD']);
+    }
+
+    public function testProductionEnvironmentCannotCompleteMissingPreviewSecrets(): void
+    {
+        $provider = new CoolifyProvider;
+        $project = new class {
+            public function environment(): object {
+                return new class {
+                    public function variables(): array { return ['DB_PASSWORD' => 'production-secret']; }
+                };
+            }
+        };
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('DB_PASSWORD');
+        (new \ReflectionMethod($provider, 'completeDatabaseEnvironment'))->invoke($provider, $project,
+            $this->profile(['DB_HOST' => 'preview.internal'], preview: true),
+            ['DB_CONNECTION' => 'mysql', 'DB_DATABASE' => 'main', 'DB_USERNAME' => 'preview']);
+    }
+
+    public function testPreviewConnectionUsesOnlyPreviewExplicitValues(): void
+    {
+        $provider = new CoolifyProvider;
+        $result = (new \ReflectionMethod($provider, 'completeDatabaseEnvironment'))->invoke($provider, new \stdClass,
+            $this->profile(['DB_HOST' => 'preview.internal', 'DB_PASSWORD' => 'preview-secret'], preview: true),
+            ['DB_CONNECTION' => 'mysql', 'DB_DATABASE' => 'main', 'DB_USERNAME' => 'preview']);
+        self::assertSame('preview-secret', $result['SHIPPER_DB_MAIN_PR_42_PASSWORD']);
+    }
+    public function testNonSqlConnectionsCannotSilentlyOmitHostOrCredentials(): void
+    {
+        $provider = new CoolifyProvider;
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $required = \in_array($type, ['mongodb', 'clickhouse'], true) ? ['HOST', 'USERNAME', 'PASSWORD'] : ['HOST', 'PASSWORD'];
+            $complete = ['SHIPPER_DB_MAIN_HOST' => 'db.internal', 'SHIPPER_DB_MAIN_USERNAME' => 'user', 'SHIPPER_DB_MAIN_PASSWORD' => 'synthetic-secret'];
+            foreach ($required as $missing) {
+                $partial = $complete;
+                unset($partial['SHIPPER_DB_MAIN_'.$missing]);
+                $failure = null;
+                try {
+                    (new \ReflectionMethod($provider, 'completeDatabaseEnvironment'))->invoke($provider, new \stdClass,
+                        $this->profile([], [['name' => 'main', 'type' => $type]]), $partial);
+                } catch (\RuntimeException $exception) { $failure = $exception; }
+                self::assertInstanceOf(\RuntimeException::class, $failure, $type.'/'.$missing);
+                self::assertStringContainsString('SHIPPER_DB_MAIN_'.$missing, $failure->getMessage());
+                self::assertStringNotContainsString('synthetic-secret', $failure->getMessage());
+            }
+        }
+    }
+
+    public function testNonSqlExplicitEmptyCredentialsRemainDistinctFromUnknown(): void
+    {
+        $provider = new CoolifyProvider;
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $generated = ['SHIPPER_DB_MAIN_HOST' => 'db.internal', 'SHIPPER_DB_MAIN_USERNAME' => '', 'SHIPPER_DB_MAIN_PASSWORD' => ''];
+            $result = (new \ReflectionMethod($provider, 'completeDatabaseEnvironment'))->invoke($provider, new \stdClass,
+                $this->profile([], [['name' => 'main', 'type' => $type]]), $generated);
+            self::assertSame($generated, $result);
+        }
+    }
+
+    public function testIncompleteNonSqlConnectionsStopBeforeApplicationRequests(): void
+    {
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $calls = [];
+            $client = new CoolifyApiClient('https://example.test', 'synthetic', transport: function ($method, $path, $body) use (&$calls): array {
+                $calls[] = [$method, $path, $body];
+                return [];
+            });
+            $provider = new CoolifyProvider;
+            $failure = null;
+            try {
+                (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', new \stdClass,
+                    $this->profile([], [['name' => 'main', 'type' => $type]]), ['SHIPPER_DB_MAIN_HOST' => 'db.internal']);
+            } catch (\RuntimeException $exception) { $failure = $exception; }
+            self::assertInstanceOf(\RuntimeException::class, $failure);
+            self::assertSame([], $calls);
+        }
+    }
+
+    public function testExplicitNonSqlSecretsReachApplicationEnvironment(): void
+    {
+        $calls = [];
+        $client = new CoolifyApiClient('https://example.test', 'synthetic', transport: function ($method, $path, $body) use (&$calls): array {
+            $calls[] = [$method, $path, $body];
+            return [];
+        });
+        $explicit = ['SHIPPER_DB_MAIN_HOST' => 'db.internal', 'SHIPPER_DB_MAIN_PASSWORD' => ''];
+        $provider = new CoolifyProvider;
+        (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', new \stdClass,
+            $this->profile($explicit, [['name' => 'main', 'type' => 'redis']]), []);
+        $writes = \array_values(\array_filter($calls, fn ($call) => $call[0] === 'POST'));
+        self::assertCount(2, $writes);
+        foreach ($writes as $write) {
+            self::assertSame($explicit[$write[2]['key']], $write[2]['value']);
+            self::assertFalse($write[2]['is_preview']);
+        }
+    }
+
+    public function testNonSqlPreviewsCannotBorrowProductionSecrets(): void
+    {
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $production = ['SHIPPER_DB_MAIN_PR_42_PASSWORD' => 'production-secret'];
+            $project = new class($production) {
+                public function __construct(private array $values) {}
+                public function environment(): object { return new class($this->values) {
+                    public function __construct(private array $values) {}
+                    public function variables(): array { return $this->values; }
+                }; }
+            };
+            $calls = [];
+            $client = new CoolifyApiClient('https://example.test', 'synthetic', transport: function ($method, $path, $body) use (&$calls): array {
+                $calls[] = [$method, $path, $body]; return [];
+            });
+            $explicit = ['SHIPPER_DB_MAIN_PR_42_HOST' => 'preview.internal', 'SHIPPER_DB_MAIN_PR_42_USERNAME' => 'preview-user'];
+            $provider = new CoolifyProvider;
+            $failure = null;
+            try {
+                (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', $project,
+                    $this->profile($explicit, [['name' => 'main', 'type' => $type]], true), []);
+            } catch (\RuntimeException $exception) { $failure = $exception; }
+            self::assertInstanceOf(\RuntimeException::class, $failure);
+            self::assertStringContainsString('SHIPPER_DB_MAIN_PR_42_PASSWORD', $failure->getMessage());
+            self::assertSame([], $calls);
+        }
+    }
+
+    public function testNonSqlPreviewValuesAreWrittenOnlyToPreviewScope(): void
+    {
+        foreach (['redis', 'dragonfly', 'keydb', 'mongodb', 'clickhouse'] as $type) {
+            $calls = [];
+            $client = new CoolifyApiClient('https://example.test', 'synthetic', transport: function ($method, $path, $body) use (&$calls): array {
+                $calls[] = [$method, $path, $body]; return [];
+            });
+            $values = ['SHIPPER_DB_MAIN_PR_42_HOST' => 'preview.internal', 'SHIPPER_DB_MAIN_PR_42_PASSWORD' => 'preview-only'];
+            if (\in_array($type, ['mongodb', 'clickhouse'], true)) $values['SHIPPER_DB_MAIN_PR_42_USERNAME'] = 'preview-user';
+            $provider = new CoolifyProvider;
+            (new \ReflectionMethod($provider, 'applyEnvironment'))->invoke($provider, $client, 'app', new \stdClass,
+                $this->profile($values, [['name' => 'main', 'type' => $type]], true), []);
+            $writes = \array_values(\array_filter($calls, fn ($call) => $call[0] === 'POST'));
+            self::assertCount(\count($values), $writes);
+            foreach ($writes as $write) {
+                self::assertTrue($write[2]['is_preview']);
+                self::assertSame($values[$write[2]['key']], $write[2]['value']);
+            }
+        }
+    }
+
+}

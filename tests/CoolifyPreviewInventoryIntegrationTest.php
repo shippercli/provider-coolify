@@ -43,7 +43,10 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
             }
             self::assertSame('/applications/app-uuid', $path);
 
-            return ['uuid' => 'app-uuid', 'name' => 'storefront'];
+            return ['uuid' => 'app-uuid', 'name' => 'storefront', 'tags' => [
+                'shippercli-managed',
+                'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'preview'], JSON_THROW_ON_ERROR)), 0, 16),
+            ]];
         });
         $mcp = new CoolifyMcpClient('https://coolify.example.test', 'token', transport: static function (array $message): array {
             if ($message['method'] === 'notifications/initialized') {
@@ -155,7 +158,7 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
                 return $this->config()[$key] ?? $default;
             }
         };
-        $resourceTag = 'shippercli-'.\substr(\hash('sha256', 'storefront|preview'), 0, 16);
+        $resourceTag = 'shippercli-'.\substr(\hash('sha256', json_encode(['storefront', 'preview'], JSON_THROW_ON_ERROR)), 0, 16);
         $previewTag = $resourceTag.'-pr-43';
         $apiCalls = [];
         $api = new CoolifyApiClient('https://coolify.example.test', 'token', transport: static function (string $method, string $path) use ($resourceTag, $previewTag, &$apiCalls): array {
@@ -170,7 +173,7 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
                 return [['uuid' => 'worker-43', 'name' => 'storefront-preview-pr-43-queue-worker-1', 'tags' => [$previewTag, 'shippercli-managed']]];
             }
             if ($method === 'GET' && $path === '/databases') {
-                return [['uuid' => 'database-43', 'name' => 'storefront-preview-pr-43', 'tags' => [$previewTag, 'shippercli-managed']]];
+                return [['uuid' => 'database-43', 'name' => 'storefront-preview-pr-43', 'tags' => [$previewTag.'-db-0123456789', 'shippercli-managed']]];
             }
 
             return [];
@@ -235,7 +238,7 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
                 return $this->config()[$key] ?? $default;
             }
         };
-        $resourceTag = 'shippercli-'.\substr(\hash('sha256', 'storefront|preview'), 0, 16);
+        $resourceTag = 'shippercli-'.\substr(\hash('sha256', json_encode(['storefront', 'preview'], JSON_THROW_ON_ERROR)), 0, 16);
         $previewTag = $resourceTag.'-pr-43';
         $apiCalls = [];
         $api = new CoolifyApiClient('https://coolify.example.test', 'token', transport: static function (string $method, string $path) use ($previewTag, &$apiCalls): array {
@@ -247,7 +250,7 @@ final class CoolifyPreviewInventoryIntegrationTest extends TestCase
                 return [['uuid' => 'worker-43', 'name' => 'storefront-preview-pr-43-queue-worker-1', 'tags' => [$previewTag, 'shippercli-managed']]];
             }
             if ($method === 'GET' && $path === '/databases') {
-                return [['uuid' => 'database-43', 'name' => 'storefront-preview-pr-43', 'tags' => [$previewTag, 'shippercli-managed']]];
+                return [['uuid' => 'database-43', 'name' => 'storefront-preview-pr-43', 'tags' => [$previewTag.'-db-0123456789', 'shippercli-managed']]];
             }
 
             return [];

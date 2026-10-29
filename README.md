@@ -205,6 +205,14 @@ Coolify status reports the application's runtime status and filters Coolify's cu
 
 Coolify provider profile settings can also contain a `databases` list with `name`, `type`, optional `user`, and optional `password`. Core project database objects are merged with these entries by name; the profile entry takes precedence when names match.
 
+Database names must remain distinct after placeholder interpolation, slug
+normalization, the 50-character limit, and preview suffix truncation. Colliding
+declarations block validation and planning before API changes. Each database
+receives `SHIPPER_DB_<NORMALIZED_NAME>_*` connection variables. The default
+`DB_*` variables come from the first SQL/SQLite declaration; missing fields are
+not borrowed from another database. Check that the selected connection has all
+required values before using it in the application.
+
 To use Coolify's Doppler, Infisical, or Vault integration for the primary application, first create and validate its integration token in Coolify, then set `coolify.secret_manager.integration_token_uuid`. Optional provider-specific `settings` are passed through to Coolify. The integration token itself is never stored in `shipper.yml`:
 
 ~~~yaml
@@ -331,3 +339,410 @@ Coolify rollback only restores a retained application image/commit. It does not 
 See the [Coolify API reference](https://coolify.io/docs/api/overview) for API-token setup and self-hosted API access requirements.
 
 Shipper's project-level `nginx_config` is applied to Git-based Coolify Static applications and to Git-based Nixpacks or Railpack applications when `coolify.application.is_static: true`. Coolify serves those static outputs through Nginx. Other build packs and non-Git sources reject this setting rather than silently ignoring it.
+
+## Existing application ownership
+
+An explicit `application_uuid` selects a resource; it does not authorize adoption.
+Apply and application lookup require both `shippercli-managed` and the matching
+project/profile resource tag before using an existing application. Missing or
+differently scoped tags fail closed before application updates or retagging.
+Review the resource identity and deployment scope separately before explicitly
+migrating tags through Coolify; Shipper does not automatically adopt it.
+
+### Scope encoding and migration
+
+Resource tags use `shippercli-` followed by the first 16 hex characters of the
+SHA-256 hash of `json_encode([projectName, profileName], JSON_THROW_ON_ERROR)`.
+A project-only scope encodes a JSON null profile, distinct from a literal `*`
+profile. Scheduled-task prefixes use the first 10 characters of the same hash.
+This encoding prevents delimiter-containing names from sharing ownership scope.
+
+Tags and task prefixes from older delimiter-based hashes require operator review.
+Verify resource identities, exact project/profile scope, preview IDs, attached
+databases, and scheduled tasks before explicitly migrating tags or task prefixes
+in Coolify. Shipper does not automatically retag resources. A same-name application
+without matching scope blocks creation rather than creating a duplicate. Legacy
+resources are excluded from ownership-based listing and cleanup until migrated.
+Database cleanup accepts only the exact scope tag or a positive numeric PR suffix.
+
+### Plan ownership inspection
+
+Plan reads application inventory and verifies an explicit application's ownership
+when `application_uuid` is configured. Unowned same-name applications, mismatched
+UUID ownership, malformed inventories/identities, and read failures return
+`blocked: true` with one public reason. Planning performs no writes. CLI
+enforcement is proposed in shippercli/cli#154. Other resources and deployment
+prerequisites remain subject to checks during apply.
+
+### Existing database declaration credentials
+
+Ordinary database declaration user/name/password values initialize new resources.
+They are not sent as implicit PATCH fields for existing tagged databases. Existing
+connection fields come from Coolify's known resource/details response; explicit
+`database_options` fields remain the opt-in update surface. A creation password
+is not substituted when an existing password is redacted. Supply missing connection
+values explicitly in the application environment; complete automatic delivery is
+not established when the API withholds those values. Live credential rotation and
+connection verification remain required for explicit credential updates.
+
+Explicit engine-specific credential fields supplied through `database_options`
+also take precedence when constructing application connection variables, even
+if Coolify returns an older `internal_db_url` after the update. URL-derived host,
+port and unspecified credentials remain available. This applies consistently to
+the primary `DB_*` variables and the per-database `SHIPPER_DB_*` variables.
+It does not verify that the running database has applied a credential change.
+
+### Incomplete SQL connections
+
+Before application environment writes, SQL connections are checked after combining
+known database values with the application environment. The primary SQL connection
+requires `DB_CONNECTION`, `DB_HOST`, `DB_DATABASE`, `DB_USERNAME`, and a known
+`DB_PASSWORD` (an explicitly empty string is allowed). Each additional SQL database
+requires its own complete `SHIPPER_DB_<RESOLVED_NAME>_*` host/database/user/password
+values. Explicit primary values also complete missing primary namespaced fields.
+An additional database never borrows the primary password. Missing fields fail
+with variable names only, without displaying credentials.
+
+Preview checks use `preview_environment_variables`, never production environment
+values. Existing resources with hidden user/database/password fields need explicit
+values; creation defaults are not evidence of an existing connection. Earlier
+application reconciliation or database provisioning may already have occurred when
+this check fails. It prevents partial connection delivery, not all earlier changes,
+and does not establish successful database authentication. Non-SQL connection
+completeness and live application connection tests remain under review.
+
+Connection URL usernames, passwords and database paths are URL-decoded exactly
+once when converted to environment variables. Literal values returned in separate
+API fields are not URL-decoded. Plus signs remain plus signs; encoded percent
+characters are not decoded a second time.
+
+### Database inventory and ownership preflight
+
+Before database reconciliation, apply validates the entire returned database
+inventory. Rows need unique non-empty UUIDs, readable names and tag lists. String
+tags and objects with `name` or `tag` are supported; conflicting tag names are
+rejected. Each database owned by the exact current scope must carry exactly one
+unambiguous per-database ownership tag. Multiple resources with that tag, multiple
+Shipper ownership tags on one resource, and legacy scope-only tags require review.
+
+During apply, this check runs before database creation, movement, updates or
+removal; application reconciliation may already have occurred. Plans also inspect
+database ownership using read-only requests and block on unavailable or ambiguous
+inventory. Profile destroy and pull-request cleanup preflight database inventory
+before deleting any application, worker or database. Database status/log selection
+uses the same validation. Scope-only legacy database tags must be reviewed and
+migrated before these operations; they no longer authorize removal. Invalid or
+overflowing preview IDs are not treated as owned previews.
+
+This does not authenticate manually editable tags, prevent changes after a read,
+or validate every non-database resource inventory. Shared resource concurrency,
+other prerequisite checks, migration review and live operation remain unfinished.
+
+### Profile application cleanup inventory
+
+Profile destroy now reads the full application inventory once and validates
+UUIDs, names and tags before deletion. It rejects duplicate UUIDs, duplicate names
+within a managed scope, unreadable tags and conflicting Shipper scope claims.
+Production applications/workers and eligible preview workers are collected into
+a unique target set, so an application is not deleted twice through overlapping
+scope queries. Preview applications themselves remain excluded from profile
+preview-worker cleanup. Preview IDs must fit a positive integer.
+
+Database and selected service inventories are read before these application
+deletions; unavailable services or invalid selected service identities stop the
+operation first. API operations remain non-transactional, and a later deletion
+failure can still leave partial cleanup. Application creation/update lookups and shared explicit-ID reads also validate
+inventory/response identities before selecting a resource. Automatic service inventory ownership checks also run before reconciliation;
+mutation-response validation and live behavior remain under review.
+
+Preview cleanup now validates its parent identity and the complete returned worker
+inventory before deleting the preview endpoint. An explicit parent UUID must match
+the returned identity. Standalone deletion is limited to exact-scope queue and
+daemon worker prefixes; preview applications, other application types sharing the
+prefix, and foreign tags are preserved. Unavailable or ambiguous worker data stops
+cleanup before any preview/worker/database deletion. Shared tagged-application
+queries now use the application inventory validator, including identity, tag and
+managed-name ambiguity checks. These checks do not prevent concurrent changes
+after preflight or make later API deletion failures transactional.
+
+Explicit application reads used by discovery and update now require a readable
+owned UUID/name response whose UUID exactly matches the requested UUID. Tagged
+update searches and global same-name collision searches validate their returned
+inventories before selection. Duplicate managed names, invalid identities and
+conflicting tags therefore stop before a PATCH or create request. A valid explicit
+UUID may retain an arbitrary readable owned application name. These consistency
+checks do not authenticate tags, lock resources after the read, or validate every
+create/update response; live behavior and those remaining paths still need review.
+
+### Automatic service ownership inventory
+
+The provider manages one Compose/catalog service per project/profile scope.
+Service apply, removal, profile destroy, and shared status/log selection validate
+service UUID/name/tag metadata before choosing a resource. Conflicting Shipper
+scope claims, duplicate identities/names and multiple services claiming the same
+scope require explicit ownership review. A global service lookup that disagrees
+with an empty scoped lookup stops creation rather than creating another service.
+Normal profile plans also preflight services using read-only requests; explicit
+PR preview plans leave shared services unchanged.
+
+This is a compatibility change for profiles with multiple services carrying the
+same ownership tag: they are no longer chosen or deleted by inference. Review
+those tags manually. These checks do not authenticate editable tags, confirm
+mutation responses or service runtime health, or lock resources after the read.
+Standalone low-level API operations remain caller-directed.
+
+### Application and service update responses
+
+After an automatic application/service PATCH, every supplied top-level or nested
+`data.uuid` must match the requested resource. Empty, null, conflicting or foreign
+identities stop follow-up operations. Acknowledgement-only responses retain the
+previously verified UUID. The merged response must still have readable metadata
+and the expected Shipper scope tags; explicit ownership loss is not ignored.
+
+This check occurs after the PATCH, which may already have changed the original
+resource. It prevents accepting an unexpected response identity for later
+operations; it is not transactional rollback or proof of the resource's runtime
+state. Create/database responses and other mutation surfaces remain under review.
+
+### Database response identity and optional detail access
+
+Database create responses must provide a valid identity not already present in
+the preflight inventory. Supplied top-level/nested UUIDs must agree. Existing and
+new database detail/update responses are checked before their values or later
+resource operations are used. Returned metadata must retain the exact database
+ownership tag. Destination-detail reads also reject a supplied mismatched UUID.
+
+Only an explicit API HTTP 403 permission refusal can preserve previously known
+database data during optional detail reads. Missing resources, server/transport
+failures, malformed identity or lost ownership do not use this fallback. The
+connection completeness checks still apply to retained known data. Creation or
+updates may already have occurred before response validation fails; recovery and
+live authentication remain unverified.
+
+Rejection tests also guard against treating PHPUnit assertion failures as expected
+runtime exceptions. This keeps a test's own failure from satisfying its exception
+check.
+
+### Application and service creation responses
+
+Automatic application/service creation requires a non-empty identity not already
+present in the complete preflight inventory. Supplied top-level/nested UUIDs must
+agree; explicit null, empty or whitespace identities are refused. Returned
+metadata must remain readable and preserve the requested scope ownership when
+merged with the request. Valid UUID-only acknowledgements remain supported;
+nested UUID acknowledgements are normalized to a top-level known identity.
+
+The request supplies metadata omitted from a thin acknowledgement. This is not
+independent read-back proof that Coolify persisted every requested setting. The
+POST can already have created a resource before an invalid response is detected;
+follow-up operations stop and account review may be required. Concurrent creations,
+other API surfaces and live runtime verification remain unfinished.
+
+### Inventory envelopes and completeness indicators
+
+REST inventory parsing supports a flat list or one unambiguous `data`/`items`
+wrapper. Explicit null data is not replaced by a second field. Failed/error
+wrappers are refused. Recognized continuation indicators (`next`,
+`next_page_url`, `next_cursor`, `has_more`), partial page metadata and totals that
+disagree with returned rows stop the operation. Complete one-page metadata and
+terminal continuation markers remain accepted. Continuation URLs are never
+requested by this parser. Supporting a future paginated endpoint requires its
+own documented traversal before its result can authorize reconciliation.
+
+These guards cover recognized metadata in the root, `meta`, `links`,
+`pagination`, and `_pagination` maps. They are not general support for arbitrary
+response envelopes or pagination protocols. Coolify's documented application
+list is a flat all-applications response; live/version-specific schema checks
+remain required. Error diagnostics do not include the continuation URL/payload.
+
+### Raw JSON inventory shapes
+
+Inventory GETs use a dedicated client path that checks JSON shape before it is
+lost during associative decoding. `{}` and `[]` are distinct: an empty object,
+a numeric-key object, an object-valued `data`/`items` container, and an empty HTTP
+body do not establish an empty list. Valid flat arrays and array-valued wrappers
+remain supported. Application environment inventory uses the same validated list
+path. Ordinary mutation acknowledgements can still return `{}`.
+
+`python3 tests/http/test_inventory_shapes.py` exercises real local HTTP/cURL
+requests with synthetic credentials, verifies shape handling, and proves bad
+database JSON blocks plan/destroy without writes. The negative control with the
+shape guard disabled reproduces the empty-object acceptance. This test runs in
+CI alongside PHPUnit; it needs loopback socket access and contacts no live account.
+The generic untyped request method remains available for object/acknowledgement
+endpoints; callers must use the inventory path when completeness matters.
+
+### HTTP failure diagnostics
+
+JSON, text and multipart HTTP failures report status-based categories rather than
+server-provided message/error bodies, which can echo credentials or uploaded data.
+The HTTP status prefix is retained for existing 403/404 handling, and 429 errors
+retain a numeric Retry-After hint. Non-JSON error bodies still report their HTTP
+status. Transport errors use cURL error categories without raw cURL URL text.
+
+The local HTTP regression sends synthetic bearer credentials, a JSON password and
+multipart password/file data, confirms the server receives them intact, and checks
+that rejected-response diagnostics do not expose them. Successful response bodies
+and application log contents are unchanged. Field-level API error details are no
+longer included in these failure messages; inspect protected server diagnostics
+when that detail is needed. This covers client exception messages, not arbitrary
+application output or user-enabled engine traces.
+
+### Bounded rate-limit retries
+
+Automatic rate-limit retries apply only to GET, HEAD and OPTIONS with a valid
+numeric Retry-After of at most five seconds, for at most two retries. Each retry
+also has a small bounded jitter. Larger hints return the HTTP 429 error immediately
+with the requested delay, so a server hint cannot suspend the CLI for hours.
+Mutation requests and responses without a valid numeric hint are not retried.
+The configured timeout remains per HTTP attempt; it is not a total operation
+deadline across attempts and retry delays.
+
+The local HTTP retry regression checks two short GET retries, single-attempt POST,
+immediate long-hint failure and invalid-hint failure. The prior implementation
+hit the test's four-second subprocess cutoff while sleeping on a one-hour hint.
+No live account or mutation was used in this check.
+
+### Project/profile database field inheritance
+
+Profile database declarations merge with a same-name project declaration field by
+field. A profile supplying only `password` retains the project's database engine
+and user. Explicit profile type/user/password fields still win. Profile-only
+databases keep the normal MySQL/empty-user defaults; explicit null fields are
+validation errors rather than omitted values.
+
+`php tests/integration/verify-cli-databases.php /path/to/installed/cli` exercises
+real CLI ConfigLoader, ProjectConfig, ProfileConfig, DatabaseConfig and environment
+objects. Both checkouts need dependencies installed; the script loads only the
+CLI configuration/YAML namespaces to avoid mixing test framework versions. It
+checks YAML inheritance, PostgreSQL create payloads, and project/profile environment
+precedence in application requests against a fake API. The unit inheritance tests
+run in provider CI; this separate cross-checkout script was run locally against
+CLI commit aa3e6a7618a32f6d3a1deae6da481f6a56eea721. It performs no live deployment.
+
+Duplicate names within the profile database list/map are rejected before merging
+with project declarations. This prevents a later profile entry from silently
+replacing an earlier engine or credential choice. Validation reports the error;
+planning blocks and database reconciliation stops before any API request.
+
+An explicitly configured empty password in `database_options` remains a known
+empty value in generated default/namespaced application variables. It is not
+silently dropped after the database update. Missing or redacted API credentials
+still require explicit application configuration; they are not inferred empty.
+
+
+### Distribution archive checks
+
+Composer archive exclusions and Git export attributes omit installed dependencies,
+tests, workflow files, root environment/auth configuration, and PHPUnit caches and
+configuration. Runtime source, package metadata, documentation, and assets remain
+available. `python3 tests/package/verify-dist.py` checks Composer and Git exports,
+then loads all declared runtime classes from an extracted ZIP with an overridden
+class map. Dependency classes come from the installed checkout; this check does
+not perform a fresh production dependency install or live deployment. CI runs it
+with the existing provider tests. Git export verification uses current worktree
+attributes; committed attributes determine subsequent GitHub source archives.
+
+### Non-SQL connection delivery checks
+
+Before application environment reads/writes, Redis, Dragonfly and KeyDB
+connections require namespaced `SHIPPER_DB_<NAME>_HOST` and `_PASSWORD` string
+values. MongoDB and ClickHouse additionally require `_USERNAME`. The host must
+be nonempty. Credentials may be explicitly empty strings; absence is not
+silently interpreted as passwordless authentication. Explicit application
+variables can supply unavailable values, with existing preview isolation and
+precedence rules. These engines do not borrow unrelated SQL `DB_*` defaults.
+
+This is a minimum field-delivery check, not a connection test. Port/database
+selection, MongoDB authentication database, replica-set/SRV topology, TLS and
+engine-specific client configuration still require application and live
+verification. A failure can occur after earlier resource operations; deployment
+is not transactional. MongoDB connection formats are described at
+https://www.mongodb.com/docs/manual/reference/connection-string/.
+
+Non-SQL preview delivery is covered separately: production project/profile
+variables cannot fill missing preview secrets, and the PR-specific namespaced
+variables are written only with `is_preview: true`. Explicit production values
+are not copied into preview requests. The HTTP fixture covers all five engines;
+a negative control enabling production fallback fails the fixture. This verifies
+request scope using synthetic data, not isolation inside a live database server.
+
+Database declaration uniqueness is checked within project declarations before
+merging profile overrides, as it already is within profile declarations. Two
+project declarations cannot silently collapse into one name, even if a profile
+override would hide the conflict. Validation/planning and direct database apply
+reject before API operations. The existing normalized-name check additionally
+rejects punctuation/case and resource-name/preview-truncation collisions before
+namespaced connection fields can overlap. One project declaration plus one
+matching profile override remains supported.
+
+When Coolify provides an internal database connection URL, Shipper additionally
+exports `SHIPPER_DB_<NAME>_URL`. It preserves the scheme, authority/seed hosts,
+path and query options rather than reducing the connection to scalar fields.
+Known credential updates are percent-encoded into the userinfo; explicit database
+updates replace the encoded path while retaining options. An explicit empty
+password remains empty, not replaced by an old URL password. Malformed URL
+structure fails with a fixed diagnostic without echoing the URL.
+
+The URL follows existing generated-environment scope and explicit override rules;
+it does not automatically set a framework-specific default URL variable. Configure
+the application to consume it when options/topology matter. This preserves the
+reported connection description; driver compatibility, authentication and live
+connectivity remain unverified.
+
+PostgreSQL named URI parameters (`host`, `port`, `user`, `password`, `dbname`)
+are reflected in scalar connection values as well as the full URL. Known user,
+password and database updates replace all corresponding query occurrences,
+including percent-encoded keys, so stale query credentials cannot override the
+new userinfo/path. Other query options retain their original bytes; URI `+`
+characters are not treated as form-encoded spaces. PostgreSQL URLs with an empty
+authority and a query host are supported. Three generated URI cases were checked
+with the installed libpq parser without opening a database connection.
+
+Reference: https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING-URIS
+This covers the named fields above, not every libpq connection parameter or live
+authentication/TLS behavior.
+
+Database passwords are literal values at the provider boundary. Creation
+passwords and engine-specific `*_password` options do not undergo provider
+`${PROJECT_NAME}`/`${PROFILE}` name-macro substitution. Names and descriptive
+metadata retain their existing interpolation. For YAML environment references,
+CLI PR #158 provides single-pass loading so injected secret contents are not
+expanded again inside profile options. This changes configurations that relied
+on provider macros inside passwords; supply the intended password explicitly
+through your secret/configuration workflow instead.
+
+Values in `database_environment_variables` are also literal at the provider
+boundary, matching application environment handling. Project/profile name macros
+are not expanded inside values that may contain secrets. Existing managed keys
+still update, new keys still create, explicitly empty strings are retained, and
+only stale variables marked as Shipper-managed are removed. Configurations that
+used provider macros in these values must supply their intended resolved values.
+
+### Deployment records in status output
+
+Public status summarizes running/history/latest deployment records, including
+worker deployment summaries. Only scalar IDs, state, pull-request identity and
+timestamps are retained. Raw logs, environment fields and unknown extra fields
+are omitted because CLI status prints its result as JSON. Consumers depending
+on raw deployment fields in status must use the appropriate explicit API method
+and handle secret-bearing responses separately. This change does not sanitize
+all low-level API methods or establish deployment/application health.
+
+Scheduled-task status similarly omits configured command strings and summarizes
+execution records to scalar identifiers, state and timestamps. Commands can embed
+credentials, and raw execution output can contain application secrets. Explicit
+scheduled-task configuration/output API methods retain their existing behavior;
+this privacy boundary applies to CLI-visible status summaries.
+
+Database backup execution records in status use the same summary boundary. Raw
+output and extra credential-bearing fields are omitted, and malformed execution
+lists are refused with a fixed diagnostic. Both direct lists and the existing
+`executions` wrapper are supported. Explicit backup execution/output API methods
+are unchanged.
+
+Status also summarizes rollback images to current/tag, creation time and current
+selection flag, refusing malformed image lists. Opt-in preview status includes
+only scalar identifiers, state and timestamps; raw preview configuration and URLs
+are omitted. Explicit image/preview API methods keep their original responses.
+Injected MCP fixtures verify the preview summary without connecting to a server.

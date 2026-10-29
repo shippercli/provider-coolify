@@ -21,9 +21,9 @@
   "config": {
     "provider": "coolify",
     "url": "https://coolify.example.com",
-    "api_token": "\${COOLIFY_API_TOKEN}",
-    "server_uuid": "\${COOLIFY_SERVER_UUID}",
-    "project_uuid": "\${COOLIFY_PROJECT_UUID}"
+    "api_token": "${COOLIFY_API_TOKEN}",
+    "server_uuid": "${COOLIFY_SERVER_UUID}",
+    "project_uuid": "${COOLIFY_PROJECT_UUID}"
   },
   "install": "Install from GitHub VCS using dev-main; see README for commands"
 }
