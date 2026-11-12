@@ -4810,12 +4810,24 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             if ($existingSource !== $sourceType) {
                 throw new \RuntimeException('Coolify application source type changed; refusing an in-place Git/Dockerfile/Docker Image conversion.');
             }
+            if ($sourceType === 'git' && ($app['source_type'] ?? null) === 'App\\Models\\GithubApp'
+                && (int) ($app['private_key_id'] ?? 0) === 0) {
+                // Coolify's GitHub source supplies the host. PATCH stores this
+                // value verbatim, so send a repository path as on creation.
+                $publicSource = (string) ($app['source_id'] ?? '') === '0';
+                $repository = \preg_replace('~^(?:https?://github\.com/|ssh://[\w.-]+@github\.com(?::[0-9]+)?/|git@github\.com:)~i', '', $source);
+                if (! \preg_match('~^[\w.-]+/[\w.-]+/?$~D', $repository)) {
+                    throw new \RuntimeException('Coolify application uses a GitHub source and requires an owner/repository path on that source.');
+                }
+                $repository = \rtrim($repository, '/');
+                $payload['git_repository'] = $publicSource ? $repository : \preg_replace('~\.git$~D', '', $repository);
+            }
             // Coolify's application PATCH schema omits these fields even though
             // create accepts them (and GET returns them). Keep them on initial
             // creation, but do not send them during reconciliation updates.
             foreach ([
                 'project_uuid', 'environment_uuid', 'environment_name', 'server_uuid',
-                'autogenerate_domain', 'dockerfile_target_build', 'static_image',
+                'autogenerate_domain', 'dockerfile_target_build', 'static_image', 'private_key_uuid',
                 'is_http_basic_auth_enabled', 'http_basic_auth_username', 'http_basic_auth_password',
             ] as $createOnlyOption) {
                 unset($payload[$createOnlyOption]);

@@ -637,11 +637,15 @@ final class CoolifyProviderTest extends TestCase
         );
     }
 
-    public function testExistingApplicationTagsUseCoolifyTagEndpointWithoutPatchingTags(): void
+    #[\PHPUnit\Framework\Attributes\TestWith([0, null, 'https://github.com/example/storefront.git', 'example/storefront.git'])]
+    #[\PHPUnit\Framework\Attributes\TestWith([42, null, 'ssh://git@github.com:443/example/storefront.git', 'example/storefront'])]
+    #[\PHPUnit\Framework\Attributes\TestWith([42, 12, 'git@github.com:example/storefront.git', 'git@github.com:example/storefront.git'])]
+    public function testExistingGitHubApplicationReconcilesRepositoryAndTags(int $sourceId, ?int $privateKeyId, string $repository, string $expectedRepository): void
     {
-        $project = new class {
+        $project = new class($repository) {
+            public function __construct(private string $repository) {}
             public function name(): string { return 'storefront'; }
-            public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
+            public function repository(): array { return ['url' => $this->repository]; }
             public function projectRoot(): string { return '/'; }
         };
         $profile = new class {
@@ -654,13 +658,16 @@ final class CoolifyProviderTest extends TestCase
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
             'api-token',
-            transport: static function (string $method, string $path, ?array $body) use (&$calls, $tag): array {
+            transport: static function (string $method, string $path, ?array $body) use (&$calls, $tag, $sourceId, $privateKeyId): array {
                 $calls[] = [$method, $path, $body];
                 if ($method === 'GET' && $path === '/applications?tag='.rawurlencode($tag)) {
                     return [[
                         'uuid' => 'app-123',
                         'name' => 'storefront-production',
-                        'git_repository' => 'https://github.com/example/storefront',
+                        'git_repository' => 'example/storefront',
+                        'source_type' => 'App\\Models\\GithubApp',
+                        'source_id' => $sourceId,
+                        'private_key_id' => $privateKeyId,
                         'tags' => [$tag, 'shippercli-managed', 'manual-tag'],
                     ]];
                 }
@@ -668,7 +675,10 @@ final class CoolifyProviderTest extends TestCase
                 return [];
             },
         );
-        $provider = new CoolifyProvider(['api_token' => 'api-token'], $client);
+        $provider = new CoolifyProvider([
+            'api_token' => 'api-token',
+            'private_key_uuid' => $privateKeyId === null ? '' : 'existing-key',
+        ], $client);
         $ensureApplication = new \ReflectionMethod($provider, 'ensureApplication');
         $ensureApplication->invoke($provider, $client, $project, $profile, 'project-1', 'environment-1', 'production', 'server-1', 'storefront-production', null);
 
@@ -680,6 +690,8 @@ final class CoolifyProviderTest extends TestCase
         }
         self::assertNotNull($patch);
         self::assertArrayNotHasKey('tags', $patch[2]);
+        self::assertArrayNotHasKey('private_key_uuid', $patch[2]);
+        self::assertSame($expectedRepository, $patch[2]['git_repository']);
         self::assertSame(
             ['POST', '/applications/app-123/tags', ['tag_names' => ['team-web', 'customer-facing']]],
             $calls[array_key_last($calls)],
