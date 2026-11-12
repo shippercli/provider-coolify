@@ -1727,35 +1727,28 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $rollbackImages = $this->applicationRollbackImages($uuid);
             $images = $rollbackImages['images'] ?? [];
             $availableTags = [];
-            $previousImages = [];
             if (\is_array($images)) {
                 foreach ($images as $image) {
                     if (\is_array($image) && \is_string($image['tag'] ?? null) && $image['tag'] !== '') {
                         $isCurrent = ($image['is_current'] ?? false) === true
                             || $image['tag'] === ($rollbackImages['current'] ?? null);
                         $availableTags[$image['tag']] = $isCurrent;
-                        if (! $isCurrent) {
-                            $previousImages[] = $image;
-                        }
                     }
                 }
             }
             $commit = $release;
             if ($commit === null || $commit === '') {
-                $hasCreationTimes = $previousImages !== []
-                    && \array_filter($previousImages, static fn (array $image): bool => \is_string($image['created_at'] ?? null)) !== [];
-                if ($hasCreationTimes) {
-                    \usort($previousImages, static fn (array $left, array $right): int =>
-                        \strcmp((string) ($right['created_at'] ?? ''), (string) ($left['created_at'] ?? '')));
-                }
-                $commit = $previousImages[0]['tag'] ?? null;
+                $current = $rollbackImages['current'] ?? null;
+                $commit = \is_string($current) && $current !== ''
+                    ? $this->previousDeploymentImage($uuid, $availableTags)
+                    : null;
             } elseif (! \array_key_exists($commit, $availableTags)) {
                 throw new \RuntimeException("Coolify rollback target '{$commit}' is not present in the application's retained rollback images.");
             } elseif ($availableTags[$commit]) {
                 throw new \RuntimeException('Coolify rollback target is already the current application image.');
             }
             if ($commit === null || $commit === '') {
-                throw new \RuntimeException('Coolify has no retained previous image to roll back to; pass an available image tag as release.');
+                throw new \RuntimeException('Coolify could not verify a previous deployment image; pass an available image tag with --release.');
             }
 
             // Workers are separate applications built from the same source. Preflight
@@ -1806,6 +1799,29 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
             return false;
         }
+    }
+
+    /** @param array<string, bool> $availableTags */
+    private function previousDeploymentImage(string $applicationUuid, array $availableTags): ?string
+    {
+        // The rollback inventory can include cached tags for other applications.
+        // Require a successful production deployment of this application as well.
+        foreach ($this->applicationDeployments($applicationUuid, 0, 20) as $deployment) {
+            if (($deployment['status'] ?? null) !== 'finished'
+                || ! \in_array($deployment['pull_request_id'] ?? null, [0, '0'], true)) {
+                continue;
+            }
+
+            $tag = $deployment['commit'] ?? null;
+            if ($tag === 'HEAD' || $tag === null || $tag === '') {
+                $tag = $deployment['docker_registry_image_tag'] ?? null;
+            }
+            if (\is_string($tag) && $tag !== '' && ($availableTags[$tag] ?? null) === false) {
+                return $tag;
+            }
+        }
+
+        return null;
     }
 
     /** @return array<int, array{site_id: int, domain: string}> */

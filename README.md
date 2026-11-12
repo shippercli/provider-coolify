@@ -745,3 +745,9 @@ selection flag, refusing malformed image lists. Opt-in preview status includes
 only scalar identifiers, state and timestamps; raw preview configuration and URLs
 are omitted. Explicit image/preview API methods keep their original responses.
 Injected MCP fixtures verify the preview summary without connecting to a server.
+
+Automatic rollback requires a retained image recorded in this application's
+successful production deployment history. Coolify may list cached tags from
+other applications that use the same image repository. If the history omits
+the previous image tag, select a retained release explicitly with
+`shipper rollback myapp --profile=production --release=previous-tag`.
