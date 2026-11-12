@@ -881,7 +881,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $applicationDestination = $this->effectiveApplicationOptions($profile)['destination_uuid'] ?? '';
             $this->reconcileResourceDestination($client, 'applications', $applicationUuid, $app, $serverUuid,
                 \is_string($applicationDestination) ? $applicationDestination : '');
-            if ($environmentUuid !== '' && ($app['environment_uuid'] ?? null) !== $environmentUuid) {
+            if ($environmentUuid !== '' && ! $this->applicationInEnvironment($client, $app, $projectUuid, $environmentUuid)) {
                 $this->moveApplication($applicationUuid, $environmentUuid);
             }
             $secretManager = $this->profileOptions($profile)['secret_manager'] ?? $this->config['secret_manager'] ?? null;
@@ -981,7 +981,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $client = $this->getClient();
             $tag = $this->resourceTag($project, $profile);
             $ownedDatabases = $this->ownedDatabasesForProfile($client, $tag);
-            $apps = $this->validateApplicationInventory($this->list($client->requestInventory('/applications')), $tag);
+            $apps = $this->applicationInventoryWithTags($client, $this->list($client->requestInventory('/applications')), $tag);
             $services = $this->ownedServices($client, $tag);
             $serviceUuids = [];
             foreach ($services as $service) {
@@ -1353,7 +1353,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
         $path = '/deployments/applications/'.\rawurlencode($applicationUuid);
 
-        return $this->list($this->getClient()->requestInventory($path.'?'.\http_build_query(['skip' => $skip, 'take' => $take])));
+        return $this->list($this->getClient()->requestInventory($path.'?'.\http_build_query(['skip' => $skip, 'take' => $take]), 'deployments'));
     }
 
     /** @return array{current?: string, images?: list<array{tag: string, created_at?: string, is_current?: bool}>} */
@@ -1887,10 +1887,11 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @return array<int, int> */
     private function ownedPreviewPullRequestIds(CoolifyApiClient $client, object $project, object $profile): array
     {
-        $tagPrefix = $this->resourceTag($project, $profile).'-pr-';
+        $scope = $this->resourceTag($project, $profile);
+        $tagPrefix = $scope.'-pr-';
         $ids = [];
         foreach ([
-            ...$this->list($client->requestInventory('/applications')),
+            ...$this->applicationInventoryWithTags($client, $this->list($client->requestInventory('/applications')), $scope),
             ...$this->list($client->requestInventory('/databases')),
         ] as $resource) {
             if (! $this->hasTag($resource, self::MARKER)) {
@@ -4522,6 +4523,27 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         return [$projectUuid, $environmentUuid, $environmentName];
     }
 
+    private function applicationInEnvironment(CoolifyApiClient $client, array $application, string $projectUuid, string $environmentUuid): bool
+    {
+        if (isset($application['environment_uuid'])) {
+            return $application['environment_uuid'] === $environmentUuid;
+        }
+
+        $currentId = $application['environment_id'] ?? null;
+        if (! \is_int($currentId) || $currentId < 1) {
+            return false;
+        }
+
+        $environments = $this->list($client->requestInventory('/projects/'.\rawurlencode($projectUuid).'/environments'));
+        foreach ($environments as $environment) {
+            if (($environment['uuid'] ?? null) === $environmentUuid) {
+                return ($environment['id'] ?? null) === $currentId;
+            }
+        }
+
+        return false;
+    }
+
     /** @return array{environment_uuid: string}|array{environment_name: string} */
     private function environmentPlacement(string $environmentUuid, string $environmentName): array
     {
@@ -4546,7 +4568,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         if ($appUuid !== '') {
             $app = $this->readOwnedApplication($client, $appUuid, $tag);
         } else {
-            foreach ($this->validateApplicationInventory($this->list($client->requestInventory('/applications?tag='.\rawurlencode($tag))), $tag) as $candidate) {
+            foreach ($this->applicationInventoryWithTags($client, $this->list($client->requestInventory('/applications?tag='.\rawurlencode($tag))), $tag) as $candidate) {
                 if (($candidate['name'] ?? null) === $name && $this->hasTag($candidate, $tag) && $this->hasTag($candidate, self::MARKER)) {
                     $app = $candidate;
                     break;
@@ -4744,7 +4766,11 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             // Coolify's application PATCH schema omits these fields even though
             // create accepts them (and GET returns them). Keep them on initial
             // creation, but do not send them during reconciliation updates.
-            foreach (['autogenerate_domain', 'dockerfile_target_build', 'static_image', 'is_http_basic_auth_enabled', 'http_basic_auth_username', 'http_basic_auth_password'] as $createOnlyOption) {
+            foreach ([
+                'project_uuid', 'environment_uuid', 'environment_name', 'server_uuid',
+                'autogenerate_domain', 'dockerfile_target_build', 'static_image',
+                'is_http_basic_auth_enabled', 'http_basic_auth_username', 'http_basic_auth_password',
+            ] as $createOnlyOption) {
                 unset($payload[$createOnlyOption]);
             }
             $app = $this->checkedResourceUpdate($app, $client->request('PATCH', '/applications/'.\rawurlencode($uuid), $payload), $uuid, $tag, 'application');
@@ -6351,7 +6377,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $applicationDestination = $this->effectiveApplicationOptions($profile)['destination_uuid'] ?? '';
                 $this->reconcileResourceDestination($client, 'applications', $workerUuid, $worker, $serverUuid,
                     \is_string($applicationDestination) ? $applicationDestination : '');
-                if ($environmentUuid !== '' && ($worker['environment_uuid'] ?? null) !== $environmentUuid) {
+                if ($environmentUuid !== '' && ! $this->applicationInEnvironment($client, $worker, $projectUuid, $environmentUuid)) {
                     $this->moveApplication($workerUuid, $environmentUuid);
                 }
                 $workerSettings = \array_intersect_key(
@@ -6461,6 +6487,26 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     /** @param array<int, array<string, mixed>> $inventory
      *  @return array<int, array<string, mixed>>
      */
+    private function applicationInventoryWithTags(CoolifyApiClient $client, array $inventory, string $scope): array
+    {
+        $validated = $this->validateApplicationInventory($inventory, $scope);
+        foreach ($inventory as $index => $app) {
+            if (! \array_key_exists('tags', $app)) {
+                $path = '/applications/'.\rawurlencode($validated[$index]['uuid']).'/tags';
+                try {
+                    $validated[$index]['tags'] = $this->list($client->requestInventory($path));
+                } catch (\RuntimeException $error) {
+                    throw new \RuntimeException('Unable to verify Coolify application tags.', 0, $error);
+                }
+            }
+        }
+
+        return $this->validateApplicationInventory($validated, $scope);
+    }
+
+    /** @param array<int, array<string, mixed>> $inventory
+     *  @return array<int, array<string, mixed>>
+     */
     private function validateServiceInventory(array $inventory, string $scope): array
     {
         $inventory = $this->validateScopedInventory($inventory, $scope, 'service');
@@ -6522,7 +6568,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $tag ??= $this->resourceTag($project, $profile);
 
         return \array_values(\array_filter(
-            $this->validateApplicationInventory($this->list($client->requestInventory('/applications?tag='.\rawurlencode($tag))), $this->resourceTag($project, $profile)),
+            $this->applicationInventoryWithTags($client, $this->list($client->requestInventory('/applications?tag='.\rawurlencode($tag))), $this->resourceTag($project, $profile)),
             fn (array $app): bool => $this->hasTag($app, $tag) && $this->hasTag($app, self::MARKER),
         ));
     }
@@ -6653,11 +6699,14 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function readOwnedApplication(CoolifyApiClient $client, string $uuid, string $tag): array
     {
         $app = $client->request('GET', '/applications/'.\rawurlencode($uuid));
-        $this->assertApplicationOwnership($app, $tag);
-        $app = $this->validateApplicationInventory([$app], $tag)[0];
-        if ($app['uuid'] !== $uuid) {
+        if (($app['uuid'] ?? null) !== $uuid) {
             throw new \RuntimeException('Coolify application identity does not match the requested UUID.');
         }
+        if (\array_key_exists('tags', $app)) {
+            $this->assertApplicationOwnership($app, $tag);
+        }
+        $app = $this->applicationInventoryWithTags($client, [$app], $tag)[0];
+        $this->assertApplicationOwnership($app, $tag);
         return $app;
     }
 

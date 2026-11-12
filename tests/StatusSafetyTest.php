@@ -21,11 +21,13 @@ final class StatusSafetyTest extends TestCase
             if ($path === '/applications/app-1/rollback-images') return ['current' => 'current-image', 'images' => [['tag' => 'previous-image', 'created_at' => '2026-10-16T12:00:00Z', 'is_current' => false, 'credentials' => 'synthetic-status-secret']], 'extra' => 'synthetic-status-secret'];
             if ($path === '/applications/app-1/scheduled-tasks') return [['uuid' => 'task-1', 'name' => $taskPrefix.'nightly', 'command' => 'echo synthetic-status-secret', 'frequency' => 'daily', 'enabled' => true]];
             if ($path === '/applications/app-1/scheduled-tasks/task-1/executions') return [['uuid' => 'execution-1', 'status' => 'success', 'created_at' => '2026-10-16T12:00:00Z', 'output' => 'synthetic-status-secret', 'extra' => ['token' => 'synthetic-status-secret']]];
-            if ($path === '/deployments' || str_starts_with($path, '/deployments/applications/app-1?')) return [[
+            $deployments = [[
                 'deployment_uuid' => 'deployment-1', 'application_id' => 1, 'status' => 'finished',
                 'created_at' => '2026-10-16T12:00:00Z', 'logs' => 'DB_PASSWORD=synthetic-status-secret',
                 'env' => ['TOKEN' => 'synthetic-status-secret'], 'extra' => ['token' => 'synthetic-status-secret'],
             ]];
+            if ($path === '/deployments') return $deployments;
+            if (str_starts_with($path, '/deployments/applications/app-1?')) return ['count' => 1, 'deployments' => $deployments];
             return [];
         });
         $project = new class { public function name(): string { return 'fixture'; } };
