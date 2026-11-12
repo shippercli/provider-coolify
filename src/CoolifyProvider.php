@@ -6747,7 +6747,11 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
 
     private function domainSchemeForSsl(object $project, string $domain): string
     {
-        if ($this->sslCertificateEnabled($project)) {
+        $sslEnabled = $this->sslCertificateEnabled($project);
+        if (! \str_contains($domain, '://')) {
+            return ($sslEnabled ? 'https://' : 'http://').$domain;
+        }
+        if ($sslEnabled) {
             return $domain;
         }
 
