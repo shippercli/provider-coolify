@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ShipperCli\ProviderCoolify\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ShipperCli\Contracts\CapabilityManifest;
 use ShipperCli\ProviderCoolify\CoolifyApiClient;
@@ -79,25 +80,37 @@ final class CoolifyProviderTest extends TestCase
         self::assertSame([], (new CoolifyProvider)->applicationPreviews('application-uuid'));
     }
 
-    public function testApplyAttachesConfiguredSecretManagerToPrimaryApplication(): void
+    #[DataProvider('applicationDeploymentOutcomes')]
+    public function testApplyAttachesSecretManagerAndChecksDeployment(string $status, ?string $error, bool $preview = false, string $resource = 'primary-app-uuid'): void
     {
         $project = new class {
             public function name(): string { return 'storefront'; }
             public function repository(): array { return ['url' => 'https://github.com/example/storefront']; }
         };
-        $profile = new class {
+        $profile = new class($preview) {
+            public function __construct(private bool $preview) {}
             public function name(): string { return 'production'; }
             public function branch(): string { return 'main'; }
-            public function config(): array { return ['coolify' => []]; }
+            public function config(): array { return ['coolify' => $this->preview ? ['pull_request_id' => 42] : []]; }
         };
         $requests = [];
         $client = new CoolifyApiClient(
             'https://coolify.example.test',
             'api-token',
-            transport: static function (string $method, string $path, ?array $body) use (&$requests): array {
+            transport: static function (string $method, string $path, ?array $body) use (&$requests, $status, $resource): array {
                 $requests[] = [$method, $path, $body];
                 if ($method === 'POST' && $path === '/applications/public') {
                     return ['uuid' => 'primary-app-uuid'];
+                }
+
+                if ($method === 'POST' && $path === '/applications/primary-app-uuid/start') {
+                    return ['deployment_uuid' => 'deployment-uuid'];
+                }
+                if ($method === 'POST' && $path === '/deploy?uuid=primary-app-uuid&pr=42') {
+                    return ['deployments' => [['deployment_uuid' => 'deployment-uuid', 'resource_uuid' => $resource]]];
+                }
+                if ($method === 'GET' && $path === '/deployments/deployment-uuid') {
+                    return ['deployment_uuid' => 'deployment-uuid', 'status' => $status];
                 }
 
                 return [];
@@ -115,7 +128,17 @@ final class CoolifyProviderTest extends TestCase
             ],
         ], $client);
 
-        self::assertTrue($provider->apply($project, $profile));
+        self::assertSame($error === null, $provider->apply($project, $profile));
+        if ($error !== null) {
+            self::assertStringContainsString($error, $provider->getLastError());
+        }
+        if ($resource !== 'primary-app-uuid') {
+            self::assertNotContains(['GET', '/deployments/deployment-uuid', null], $requests);
+
+            return;
+        }
+
+        self::assertContains(['GET', '/deployments/deployment-uuid', null], $requests);
         self::assertContains(
             ['PATCH', '/applications/primary-app-uuid/secret-manager', [
                 'integration_token_uuid' => 'integration-uuid',
@@ -123,6 +146,18 @@ final class CoolifyProviderTest extends TestCase
             ]],
             $requests,
         );
+    }
+
+    public static function applicationDeploymentOutcomes(): array
+    {
+        return [
+            'finished' => ['finished', null],
+            'failed' => ['failed', 'deployment deployment-uuid ended with status failed'],
+            'cancelled' => ['cancelled-by-user', 'deployment deployment-uuid ended with status cancelled-by-user'],
+            'preview finished' => ['finished', null, true],
+            'preview wrong resource' => ['finished', 'did not identify the submitted application deployment', true, 'other-app'],
+            'unknown' => ['unknown', 'unrecognized status for deployment deployment-uuid'],
+        ];
     }
 
     public function testCreateModeServerSpecIsValidatedBeforeProvisioning(): void
@@ -313,7 +348,7 @@ final class CoolifyProviderTest extends TestCase
         ], $calls);
     }
 
-    public function testWorkerWithRestartDisabledDeploysInitiallyAndRetriesFailedDeployment(): void
+    public function testWorkerWithRestartDisabledDeploysInitiallyAndTracksPendingDeployment(): void
     {
         $latestStatus = '';
         $calls = [];
@@ -322,23 +357,32 @@ final class CoolifyProviderTest extends TestCase
             'api-token',
             transport: static function (string $method, string $path, ?array $body) use (&$calls, &$latestStatus): array {
                 $calls[] = [$method, $path, $body];
+                if ($method === 'POST' && $path === '/deploy?uuid=worker-123') {
+                    return ['deployments' => [['deployment_uuid' => 'deployment-new', 'resource_uuid' => 'worker-123']]];
+                }
 
-                return $latestStatus === '' ? [] : [['uuid' => 'deployment-1', 'status' => $latestStatus]];
+                return $latestStatus === '' ? [] : [['deployment_uuid' => 'deployment-existing', 'status' => $latestStatus]];
             },
         );
         $provider = new CoolifyProvider(['api_token' => 'api-token'], $client);
-        $needsDeployment = new \ReflectionMethod($provider, 'workerNeedsDeployment');
+        $ensureDeployment = new \ReflectionMethod($provider, 'ensureWorkerDeployment');
 
-        self::assertTrue($needsDeployment->invoke($provider, $client, 'worker-123', false));
+        self::assertSame('deployment-new', $ensureDeployment->invoke($provider, $client, 'worker-123', false, false));
         $latestStatus = 'finished';
-        self::assertFalse($needsDeployment->invoke($provider, $client, 'worker-123', false));
+        self::assertNull($ensureDeployment->invoke($provider, $client, 'worker-123', false, false));
         $latestStatus = 'failed';
-        self::assertTrue($needsDeployment->invoke($provider, $client, 'worker-123', false));
-        self::assertTrue($needsDeployment->invoke($provider, $client, 'worker-123', true));
+        self::assertSame('deployment-new', $ensureDeployment->invoke($provider, $client, 'worker-123', false, false));
+        $latestStatus = 'in_progress';
+        self::assertSame('deployment-existing', $ensureDeployment->invoke($provider, $client, 'worker-123', false, false));
+        self::assertSame('deployment-new', $ensureDeployment->invoke($provider, $client, 'worker-123', true, false));
         self::assertSame([
             ['GET', '/deployments/applications/worker-123?skip=0&take=1', null],
+            ['POST', '/deploy?uuid=worker-123', null],
             ['GET', '/deployments/applications/worker-123?skip=0&take=1', null],
             ['GET', '/deployments/applications/worker-123?skip=0&take=1', null],
+            ['POST', '/deploy?uuid=worker-123', null],
+            ['GET', '/deployments/applications/worker-123?skip=0&take=1', null],
+            ['POST', '/deploy?uuid=worker-123', null],
         ], $calls);
     }
 

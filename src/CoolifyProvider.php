@@ -25,6 +25,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     use CoolifyAdditionalResourceOperations;
     use CoolifySourceOperations;
 
+    private const DEPLOYMENT_WAIT_SECONDS = 600;
+
     private const MARKER = 'shippercli-managed';
     private const ENVIRONMENT_MARKER = 'Managed by ShipperCLI';
 
@@ -916,9 +918,15 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $forceDeploy = $this->profileOptions($profile)['force_deploy'] ?? $this->config['force_deploy'] ?? false;
             $instantDeploy = ($this->effectiveApplicationOptions($profile)['instant_deploy'] ?? false) === true;
             if ($pullRequestId === '') {
-                $this->startApplicationResource($applicationUuid, $forceDeploy === true, $instantDeploy);
+                $start = $this->startApplicationResource($applicationUuid, $forceDeploy === true, $instantDeploy);
+                if (($start['message'] ?? null) === 'Deployment already queued for this commit.'
+                    && ! isset($start['deployment_uuid'])) {
+                    throw new \RuntimeException('Coolify already has a deployment queued for this commit and did not identify it. Check its status before retrying.');
+                }
+                $deploymentUuids = [$this->deploymentUuid($start)];
             } else {
-                $this->deployResource($client, $applicationUuid, $pullRequestId, $dockerTag, $forceDeploy === true);
+                $deploy = $this->deployResource($client, $applicationUuid, $pullRequestId, $dockerTag, $forceDeploy === true);
+                $deploymentUuids = [$this->submittedApplicationDeployment($deploy, $applicationUuid)];
             }
             $previewDomains = $this->profileOptions($profile)['preview_domains'] ?? $this->config['preview_domains'] ?? null;
             if ($pullRequestId !== '' && \is_array($previewDomains)) {
@@ -950,11 +958,17 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $uuid = $this->resourceUuid($worker);
                 $workerName = \is_string($worker['name'] ?? null) ? $worker['name'] : '';
                 $restartOnDeploy = $desiredWorkerNames[$workerName] ?? false;
-                if ($uuid !== $applicationUuid && \array_key_exists($workerName, $desiredWorkerNames)
-                    && $this->workerNeedsDeployment($client, $uuid, $restartOnDeploy)) {
-                    $this->deployResource($client, $uuid, '', '', $forceDeploy === true);
+                if ($uuid === $applicationUuid || ! \array_key_exists($workerName, $desiredWorkerNames)) {
+                    continue;
+                }
+
+                $deploymentUuid = $this->ensureWorkerDeployment($client, $uuid, $restartOnDeploy, $forceDeploy === true);
+                if ($deploymentUuid !== null) {
+                    $deploymentUuids[] = $deploymentUuid;
                 }
             }
+
+            $this->waitForApplicationDeployments($deploymentUuids);
 
             return true;
         } catch (\Throwable $exception) {
@@ -6498,22 +6512,24 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         return $storages;
     }
 
-    private function workerNeedsDeployment(CoolifyApiClient $client, string $workerUuid, bool $restartOnDeploy): bool
+    private function ensureWorkerDeployment(CoolifyApiClient $client, string $workerUuid, bool $restartOnDeploy, bool $force): ?string
     {
-        if ($restartOnDeploy) {
-            return true;
+        if (! $restartOnDeploy) {
+            $history = $this->applicationDeployments($workerUuid, take: 1);
+            if ($history !== []) {
+                $status = \strtolower((string) ($history[0]['status'] ?? ''));
+                if ($status === 'queued' || $status === 'in_progress') {
+                    return $this->deploymentUuid($history[0]);
+                }
+                if (! \in_array($status, ['failed', 'error', 'cancelled', 'cancelled-by-user', 'cancelled_by_user'], true)) {
+                    return null;
+                }
+            }
         }
 
-        $history = $this->list($client->requestInventory('/deployments/applications/'.\rawurlencode($workerUuid).'?skip=0&take=1',
-        ));
+        $response = $this->deployResource($client, $workerUuid, '', '', $force);
 
-        if ($history === []) {
-            return true;
-        }
-
-        $status = \strtolower((string) ($history[0]['status'] ?? ''));
-
-        return \in_array($status, ['failed', 'error', 'cancelled', 'cancelled-by-user', 'cancelled_by_user'], true);
+        return $this->submittedApplicationDeployment($response, $workerUuid);
     }
 
     private function dockerImageEntrypointOptions(string $configuredOptions, string $command): string
@@ -7424,7 +7440,8 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         return \is_string($value) ? \trim($value) : '';
     }
 
-    private function deployResource(CoolifyApiClient $client, string $resourceUuid, string $pullRequestId, string $dockerTag = '', bool $force = false): void
+    /** @return array<string, mixed> */
+    private function deployResource(CoolifyApiClient $client, string $resourceUuid, string $pullRequestId, string $dockerTag = '', bool $force = false): array
     {
         $path = '/deploy?uuid='.\rawurlencode($resourceUuid);
         if ($force) {
@@ -7448,6 +7465,64 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                     throw new \RuntimeException("Coolify could not deploy pull request preview: {$message}");
                 }
             }
+        }
+
+        return $response;
+    }
+
+    /** @param array<string, mixed> $response */
+    private function submittedApplicationDeployment(array $response, string $applicationUuid): string
+    {
+        $deployments = $response['deployments'] ?? null;
+        if (\is_array($deployments) && \array_is_list($deployments) && \count($deployments) === 1
+            && \is_array($deployments[0]) && ($deployments[0]['resource_uuid'] ?? null) === $applicationUuid) {
+            if (($deployments[0]['message'] ?? null) === 'Deployment already queued for this commit.') {
+                throw new \RuntimeException('Coolify already has a deployment queued for this commit. Check its status before retrying.');
+            }
+
+            return $this->deploymentUuid($deployments[0]);
+        }
+
+        throw new \RuntimeException('Coolify did not identify the submitted application deployment.');
+    }
+
+    /** @param array<string, mixed> $response */
+    private function deploymentUuid(array $response): string
+    {
+        $uuid = $response['deployment_uuid'] ?? null;
+        if (! \is_string($uuid) || \preg_match('/^[a-zA-Z0-9_-]+$/D', $uuid) !== 1) {
+            throw new \RuntimeException('Coolify did not return a valid deployment UUID. Check the application status before retrying.');
+        }
+
+        return $uuid;
+    }
+
+    /** @param list<string> $uuids */
+    private function waitForApplicationDeployments(array $uuids): void
+    {
+        $deadline = \hrtime(true) + self::DEPLOYMENT_WAIT_SECONDS * 1_000_000_000;
+        foreach ($uuids as $uuid) {
+            while (\hrtime(true) < $deadline) {
+                $deployment = $this->deployment($uuid);
+                if (($deployment['deployment_uuid'] ?? null) !== $uuid) {
+                    throw new \RuntimeException("Coolify returned a different or missing identity for deployment {$uuid}.");
+                }
+
+                $status = $deployment['status'] ?? null;
+                if ($status === 'finished') {
+                    continue 2;
+                }
+                if ($status === 'failed' || $status === 'cancelled-by-user') {
+                    throw new \RuntimeException("Coolify deployment {$uuid} ended with status {$status}. Check its deployment logs in Coolify.");
+                }
+                if ($status !== 'queued' && $status !== 'in_progress') {
+                    throw new \RuntimeException("Coolify returned an unrecognized status for deployment {$uuid}.");
+                }
+
+                \sleep(2);
+            }
+
+            throw new \RuntimeException("Timed out waiting for Coolify deployment {$uuid}. Check its status before retrying.");
         }
     }
 
