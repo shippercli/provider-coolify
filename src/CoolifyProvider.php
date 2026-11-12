@@ -1804,7 +1804,12 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 }
             }
             foreach ($rollbackTargets as $target) {
-                $client->request('POST', '/applications/'.\rawurlencode($target['uuid']).'/rollback', ['commit' => $target['commit']]);
+                $response = $client->request('POST', '/applications/'.\rawurlencode($target['uuid']).'/rollback', ['commit' => $target['commit']]);
+                $deploymentUuid = $response['deployment_uuid'] ?? null;
+                if (! \is_string($deploymentUuid) || $deploymentUuid === '') {
+                    throw new \RuntimeException('Coolify did not return a rollback deployment UUID. Check the application deployment history before retrying.');
+                }
+                $this->waitForApplicationDeployments([$deploymentUuid]);
             }
 
             return true;

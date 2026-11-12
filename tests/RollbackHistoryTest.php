@@ -19,11 +19,12 @@ final class RollbackHistoryTest extends TestCase
             ['status' => 'finished', 'pull_request_id' => 0, 'commit' => 'HEAD', 'docker_registry_image_tag' => null],
         ];
         $queued = [];
+        $rollbackStatuses = ['finished', 'finished', 'queued', 'failed'];
         $client = new CoolifyApiClient('https://coolify.example.test', 'synthetic-token', transport: static function (
             string $method,
             string $path,
             ?array $body,
-        ) use ($scope, &$deployments, &$queued): array {
+        ) use ($scope, &$deployments, &$queued, &$rollbackStatuses): array {
             if ($method === 'POST' && $path === '/applications/app-1/rollback') {
                 $queued[] = $body['commit'];
 
@@ -38,6 +39,7 @@ final class RollbackHistoryTest extends TestCase
                     ['tag' => 'previous', 'created_at' => '2026-11-11T10:00:00Z'],
                 ]],
                 '/deployments/applications/app-1?skip=0&take=20' => ['deployments' => $deployments],
+                '/deployments/rollback-1' => ['deployment_uuid' => 'rollback-1', 'status' => array_shift($rollbackStatuses)],
                 '/applications?tag='.$scope => [],
                 default => throw new \RuntimeException('Unexpected request: '.$method.' '.$path),
             };
@@ -59,5 +61,8 @@ final class RollbackHistoryTest extends TestCase
         ];
         self::assertTrue($provider->rollback($project, $profile), $provider->getLastError());
         self::assertSame(['previous', 'previous'], $queued);
+        self::assertFalse($provider->rollback($project, $profile, 'previous'));
+        self::assertStringContainsString('rollback-1', $provider->getLastError());
+        self::assertSame([], $rollbackStatuses);
     }
 }
