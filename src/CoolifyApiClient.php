@@ -44,15 +44,15 @@ final class CoolifyApiClient
     }
 
     /** @return array<string, mixed> */
-    public function requestInventory(string $path): array
+    public function requestInventory(string $path, ?string $listKey = null): array
     {
-        return $this->requestJson('GET', $path, null, true);
+        return $this->requestJson('GET', $path, null, true, $listKey);
     }
 
     /** @param array<string, mixed>|null $body
      *  @return array<string, mixed>
      */
-    private function requestJson(string $method, string $path, ?array $body, bool $inventory): array
+    private function requestJson(string $method, string $path, ?array $body, bool $inventory, ?string $listKey = null): array
     {
         if (! \str_starts_with($path, '/') || \str_contains($path, "\n") || \str_contains($path, "\r")) {
             throw new \InvalidArgumentException('Coolify API paths must be absolute API paths.');
@@ -65,7 +65,7 @@ final class CoolifyApiClient
             }
 
             if ($inventory) {
-                return $this->decodeInventory(\json_encode($response, JSON_THROW_ON_ERROR));
+                return $this->decodeInventory(\json_encode($response, JSON_THROW_ON_ERROR), $listKey);
             }
             return $response;
         }
@@ -107,11 +107,11 @@ final class CoolifyApiClient
         }
 
 
-        return $inventory ? $this->decodeInventory($responseBody) : $decoded;
+        return $inventory ? $this->decodeInventory($responseBody, $listKey) : $decoded;
     }
 
     /** @return array<string, mixed> */
-    private function decodeInventory(string $body): array
+    private function decodeInventory(string $body, ?string $listKey = null): array
     {
         if ($body === '') {
             throw new \RuntimeException('Coolify inventory response has no JSON body.');
@@ -128,6 +128,16 @@ final class CoolifyApiClient
         }
         $hasData = \property_exists($shape, 'data');
         $hasItems = \property_exists($shape, 'items');
+        if ($listKey !== null && \property_exists($shape, $listKey)) {
+            if ($hasData || $hasItems || ! \is_array($shape->{$listKey})) {
+                throw new \RuntimeException('Coolify inventory response has an invalid JSON list envelope.');
+            }
+
+            $decoded['data'] = $decoded[$listKey];
+            unset($decoded[$listKey]);
+            return $decoded;
+        }
+
         if ($hasData === $hasItems || ! \is_array($hasData ? $shape->data : $shape->items)) {
             throw new \RuntimeException('Coolify inventory response has an invalid JSON list envelope.');
         }

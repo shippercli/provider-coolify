@@ -56,4 +56,26 @@ final class ApplicationLookupIdentityTest extends TestCase
         self::assertSame([['GET', '/applications/requested']], $calls);
     }
 
+    public function testExplicitLookupReadsMissingTagsFromDedicatedEndpoint(): void
+    {
+        $scope = 'shippercli-0123456789abcdef';
+        $app = ['uuid' => 'requested', 'name' => 'custom-owned-name'];
+        $calls = [];
+        $client = new CoolifyApiClient('https://example.test', 'synthetic', transport:
+            static function (string $method, string $path) use (&$calls, $app, $scope): array {
+                $calls[] = [$method, $path];
+
+                return match ($path) {
+                    '/applications/requested' => $app,
+                    '/applications/requested/tags' => [['name' => 'shippercli-managed'], ['name' => $scope]],
+                    default => throw new \RuntimeException('Unexpected API call'),
+                };
+            });
+        $provider = new CoolifyProvider;
+        $result = (new \ReflectionMethod($provider, 'readOwnedApplication'))->invoke($provider, $client, 'requested', $scope);
+
+        self::assertSame([...$app, 'tags' => ['shippercli-managed', $scope]], $result);
+        self::assertSame([['GET', '/applications/requested'], ['GET', '/applications/requested/tags']], $calls);
+    }
+
 }
