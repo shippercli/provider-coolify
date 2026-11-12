@@ -4,10 +4,10 @@ Composer plugin source for deploying Shipper projects to Coolify. The package is
 
 ## Install
 
-Add the GitHub VCS repository and require the provider's `main` branch in the project that owns the deployment configuration:
+Add the GitHub repository and require the provider's `main` branch in the project that owns the deployment configuration. If the workspace has no `composer.json`, run `composer init --name=local/shipper-deployment --no-interaction` first.
 
 ~~~sh
-composer config repositories.provider-coolify vcs https://github.com/shippercli/provider-coolify
+composer config repositories.provider-coolify git https://github.com/shippercli/provider-coolify.git
 composer require shippercli/cli 'shippercli/provider-coolify:dev-main'
 ~~~
 
