@@ -390,8 +390,8 @@ final class CoolifyProviderTest extends TestCase
     public function testSslSettingControlsCoolifyDomainCertificateScheme(): void
     {
         $profile = new class {
-            public function domain(): string { return 'https://shop.example.test'; }
-            public function aliases(): array { return ['https://www.shop.example.test']; }
+            public function domain(): string { return 'shop.example.test'; }
+            public function aliases(): array { return ['https://www.shop.example.test', 'http://legacy.example.test']; }
             public function get(string $key, mixed $default = ''): mixed { return $key === 'domain' ? $this->domain() : $default; }
         };
         $project = new class {
@@ -407,7 +407,7 @@ final class CoolifyProviderTest extends TestCase
         $desiredDomains = new \ReflectionMethod($provider, 'desiredDomains');
 
         self::assertSame(
-            ['http://shop.example.test', 'http://www.shop.example.test'],
+            ['http://shop.example.test', 'http://www.shop.example.test', 'http://legacy.example.test'],
             $desiredDomains->invoke($provider, $project, $profile),
         );
 
@@ -422,7 +422,7 @@ final class CoolifyProviderTest extends TestCase
         };
 
         self::assertSame(
-            ['https://shop.example.test', 'https://www.shop.example.test'],
+            ['https://shop.example.test', 'https://www.shop.example.test', 'http://legacy.example.test'],
             $desiredDomains->invoke($provider, $enabledProject, $profile),
         );
     }
