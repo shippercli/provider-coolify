@@ -25,5 +25,5 @@
     "server_uuid": "${COOLIFY_SERVER_UUID}",
     "project_uuid": "${COOLIFY_PROJECT_UUID}"
   },
-  "install": "Install from GitHub VCS using dev-main; see README for commands"
+  "install": "composer config repositories.provider-coolify git https://github.com/shippercli/provider-coolify.git\ncomposer require 'shippercli/cli:^1.0.5' 'shippercli/provider-coolify:^1.0'"
 }
