@@ -11,3 +11,4 @@
 - Add cloud-provider token renaming and private-key CRUD operations.
 - Install the unpublished provider from its GitHub VCS repository until a stable Packagist release is available.
 - Reconcile existing service tags through Coolify's dedicated tag endpoint instead of sending tags in the service update payload.
+- Preserve Coolify's GitHub repository path on redeploy and keep deploy-key selection on application creation.
