@@ -1,17 +1,16 @@
 # Shipper Coolify Provider
 
-Composer plugin source for deploying Shipper projects to Coolify. The package is not currently listed in the shippercli Packagist catalog; until it is published, install the `main` branch from GitHub as shown below.
+Composer plugin for deploying Shipper projects to Coolify. Install the tagged provider from GitHub using Composer's Git driver.
 
 ## Install
 
-Add the GitHub repository and require the provider's `main` branch in the project that owns the deployment configuration. If the workspace has no `composer.json`, run `composer init --name=local/shipper-deployment --no-interaction` first.
+Add the GitHub repository and require the tagged provider in the project that owns the deployment configuration. If the workspace has no `composer.json`, run `composer init --name=local/shipper-deployment --no-interaction` first.
 
 ~~~sh
 composer config repositories.provider-coolify git https://github.com/shippercli/provider-coolify.git
-composer require shippercli/cli 'shippercli/provider-coolify:dev-main'
+composer require 'shippercli/cli:^1.0.5' 'shippercli/provider-coolify:^1.0'
+vendor/bin/shipper --version
 ~~~
-
-After a stable provider release is published to Packagist, the VCS repository can be removed and the provider installed with `composer require shippercli/cli shippercli/provider-coolify`.
 
 Keep provider packages out of the application's runtime composer.json unless that application is also the deployment controller.
 
@@ -21,9 +20,9 @@ Keep provider packages out of the application's runtime composer.json unless tha
 providers:
   coolify:
     url: https://coolify.example.com
-    api_token: \${COOLIFY_API_TOKEN}
-    server_uuid: \${COOLIFY_SERVER_UUID}
-    project_uuid: \${COOLIFY_PROJECT_UUID}
+    api_token: ${COOLIFY_API_TOKEN}
+    server_uuid: ${COOLIFY_SERVER_UUID}
+    project_uuid: ${COOLIFY_PROJECT_UUID}
 
 projects:
   storefront:
