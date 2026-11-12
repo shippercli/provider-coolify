@@ -10,6 +10,75 @@ use ShipperCli\ProviderCoolify\CoolifyProvider;
 
 final class DatabaseInventoryOwnershipTest extends TestCase
 {
+    public function testMissingInlineTagsUseResourceReadbackAndRejectDuplicateOwners(): void
+    {
+        $provider = new CoolifyProvider;
+        $scope = 'shippercli-0123456789abcdef';
+        $tag = $scope.'-db-0123456789';
+        $tags = [['name' => 'shippercli-managed'], ['name' => $tag]];
+        $calls = [];
+        $duplicate = false;
+        $client = new CoolifyApiClient('https://example.test', 'synthetic', transport:
+            static function (string $method, string $path) use (&$calls, &$duplicate, $tags): array {
+                $calls[] = [$method, $path];
+
+                return match ($path) {
+                    '/databases' => [
+                        ['uuid' => 'one', 'name' => 'cache'],
+                        ['uuid' => 'two', 'name' => 'unrelated', 'tags' => $duplicate ? $tags : []],
+                    ],
+                    '/databases/one/tags' => $tags,
+                    default => throw new \RuntimeException('Unexpected request'),
+                };
+            });
+        $lookup = new \ReflectionMethod($provider, 'ownedDatabases');
+
+        self::assertSame(['one'], array_column($lookup->invoke($provider, $client, $scope), 'uuid'));
+        self::assertSame([['GET', '/databases'], ['GET', '/databases/one/tags']], $calls);
+
+        $duplicate = true;
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('ambiguous or legacy ownership');
+        $lookup->invoke($provider, $client, $scope);
+    }
+
+    public function testRepeatApplyReusesDatabaseInTargetEnvironmentByNumericId(): void
+    {
+        $project = new class { public function name(): string { return 'storefront'; } };
+        $profile = new class {
+            public function name(): string { return 'production'; }
+            public function config(): array { return ['coolify' => ['databases' => [['name' => 'cache', 'type' => 'redis']]]]; }
+        };
+        $provider = new CoolifyProvider;
+        $scope = (new \ReflectionMethod($provider, 'resourceTag'))->invoke($provider, $project, $profile);
+        $database = [
+            'uuid' => 'owned-cache',
+            'name' => 'cache',
+            'environment_id' => 42,
+            'tags' => ['shippercli-managed', $scope.'-db-'.substr(hash('sha256', 'cache'), 0, 10)],
+        ];
+        $calls = [];
+        $client = new CoolifyApiClient('https://example.test', 'synthetic', transport:
+            static function (string $method, string $path) use (&$calls, $database): array {
+                $calls[] = [$method, $path];
+
+                return match ([$method, $path]) {
+                    ['GET', '/databases'] => [$database],
+                    ['GET', '/projects/project/environments'] => [['id' => 42, 'uuid' => 'environment']],
+                    ['GET', '/databases/owned-cache'] => $database,
+                    ['GET', '/databases/owned-cache/envs'] => [],
+                    default => throw new \RuntimeException('Unexpected request: '.$method.' '.$path),
+                };
+            });
+
+        (new \ReflectionMethod($provider, 'applyDatabases'))->invoke(
+            $provider, $client, $project, $profile, 'project', 'environment', 'production', 'server',
+        );
+
+        self::assertContains(['GET', '/projects/project/environments'], $calls);
+        self::assertSame(['GET'], array_values(array_unique(array_column($calls, 0))));
+    }
+
     public function testAmbiguousLaterDatabaseStopsBeforeEarlierDatabaseMutation(): void
     {
         $project = new class { public function name(): string { return 'storefront'; } };

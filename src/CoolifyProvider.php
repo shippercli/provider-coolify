@@ -748,7 +748,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             try {
                 $scope = $this->resourceTag($project, $profile);
                 if (($pr = $this->pullRequestId($profile)) !== '') $scope .= '-pr-'.$pr;
-                $this->validateDatabaseInventory($this->list($this->getClient()->requestInventory('/databases')), $scope);
+                $this->databaseInventoryWithTags($this->getClient(), $scope);
             } catch (\Throwable) {
                 $blocked = 'Unable to verify Coolify database inventory and ownership. Review API access and resource tags before deployment.';
             }
@@ -881,7 +881,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $applicationDestination = $this->effectiveApplicationOptions($profile)['destination_uuid'] ?? '';
             $this->reconcileResourceDestination($client, 'applications', $applicationUuid, $app, $serverUuid,
                 \is_string($applicationDestination) ? $applicationDestination : '');
-            if ($environmentUuid !== '' && ! $this->applicationInEnvironment($client, $app, $projectUuid, $environmentUuid)) {
+            if ($environmentUuid !== '' && ! $this->resourceInEnvironment($client, $app, $projectUuid, $environmentUuid)) {
                 $this->moveApplication($applicationUuid, $environmentUuid);
             }
             $secretManager = $this->profileOptions($profile)['secret_manager'] ?? $this->config['secret_manager'] ?? null;
@@ -1908,7 +1908,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $ids = [];
         foreach ([
             ...$this->applicationInventoryWithTags($client, $this->list($client->requestInventory('/applications')), $scope),
-            ...$this->list($client->requestInventory('/databases')),
+            ...$this->databaseInventoryWithTags($client, $scope, true),
         ] as $resource) {
             if (! $this->hasTag($resource, self::MARKER)) {
                 continue;
@@ -4539,13 +4539,13 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         return [$projectUuid, $environmentUuid, $environmentName];
     }
 
-    private function applicationInEnvironment(CoolifyApiClient $client, array $application, string $projectUuid, string $environmentUuid): bool
+    private function resourceInEnvironment(CoolifyApiClient $client, array $resource, string $projectUuid, string $environmentUuid): bool
     {
-        if (isset($application['environment_uuid'])) {
-            return $application['environment_uuid'] === $environmentUuid;
+        if (isset($resource['environment_uuid'])) {
+            return $resource['environment_uuid'] === $environmentUuid;
         }
 
-        $currentId = $application['environment_id'] ?? null;
+        $currentId = $resource['environment_id'] ?? null;
         if (! \is_int($currentId) || $currentId < 1) {
             return false;
         }
@@ -5347,7 +5347,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         $applicationEnvironment = [];
         $baseTag = $this->resourceTag($project, $profile);
         $scopeTag = $this->pullRequestId($profile) !== '' ? $baseTag.'-pr-'.$this->pullRequestId($profile) : $baseTag;
-        $inventory = $this->validateDatabaseInventory($this->list($client->requestInventory('/databases')), $scopeTag);
+        $inventory = $this->databaseInventoryWithTags($client, $scopeTag);
         $wantedTags = [];
         foreach ($databases as $database) {
             $name = $this->databaseResourceName($database['name'], $project, $profile);
@@ -5392,7 +5392,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             if ($existing !== null) {
                 $existingUuid = $this->resourceUuid($existing);
                 if ($existingUuid !== '' && $environmentUuid !== ''
-                    && ($existing['environment_uuid'] ?? null) !== $environmentUuid) {
+                    && ! $this->resourceInEnvironment($client, $existing, $projectUuid, $environmentUuid)) {
                     $client->request('POST', '/databases/'.\rawurlencode($existingUuid).'/move', [
                         'environment_uuid' => $environmentUuid,
                     ]);
@@ -5526,8 +5526,28 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         return $applicationEnvironment;
     }
 
-    /** @param array<int, array<string, mixed>> $inventory
-     *  @return array<int, array<string, mixed>>
+    /** @return array<int, array<string, mixed>> */
+    private function databaseInventoryWithTags(CoolifyApiClient $client, string $scope, bool $includePreviews = false): array
+    {
+        $inventory = $this->list($client->requestInventory('/databases'));
+        $validated = $this->validateDatabaseInventory($inventory, $scope, $includePreviews);
+        foreach ($inventory as $index => $database) {
+            if (! \array_key_exists('tags', $database)) {
+                $path = '/databases/'.\rawurlencode($validated[$index]['uuid']).'/tags';
+                try {
+                    $validated[$index]['tags'] = $this->list($client->requestInventory($path));
+                } catch (\RuntimeException $error) {
+                    throw new \RuntimeException('Unable to verify Coolify database inventory tags.', 0, $error);
+                }
+            }
+        }
+
+        return $this->validateDatabaseInventory($validated, $scope, $includePreviews);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $inventory
+     * @return array<int, array<string, mixed>>
      */
     private function validateDatabaseInventory(array $inventory, string $scope, bool $includePreviews = false): array
     {
@@ -6405,7 +6425,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $applicationDestination = $this->effectiveApplicationOptions($profile)['destination_uuid'] ?? '';
                 $this->reconcileResourceDestination($client, 'applications', $workerUuid, $worker, $serverUuid,
                     \is_string($applicationDestination) ? $applicationDestination : '');
-                if ($environmentUuid !== '' && ! $this->applicationInEnvironment($client, $worker, $projectUuid, $environmentUuid)) {
+                if ($environmentUuid !== '' && ! $this->resourceInEnvironment($client, $worker, $projectUuid, $environmentUuid)) {
                     $this->moveApplication($workerUuid, $environmentUuid);
                 }
                 $workerSettings = \array_intersect_key(
@@ -6749,7 +6769,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function ownedDatabases(CoolifyApiClient $client, string $tag): array
     {
         return \array_values(\array_filter(
-            $this->validateDatabaseInventory($this->list($client->requestInventory('/databases')), $tag),
+            $this->databaseInventoryWithTags($client, $tag),
             fn (array $database): bool => $this->hasDatabaseScopeTag($database, $tag, false) && $this->hasTag($database, self::MARKER),
         ));
     }
@@ -6758,7 +6778,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function ownedDatabasesForProfile(CoolifyApiClient $client, string $resourceTag): array
     {
         return \array_values(\array_filter(
-            $this->validateDatabaseInventory($this->list($client->requestInventory('/databases')), $resourceTag, true),
+            $this->databaseInventoryWithTags($client, $resourceTag, true),
             function (array $database) use ($resourceTag): bool {
                 if (! $this->hasTag($database, self::MARKER)) {
                     return false;
