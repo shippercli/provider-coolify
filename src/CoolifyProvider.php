@@ -4622,7 +4622,11 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 $payload['docker_registry_image_tag'] = $imageTag;
             }
         } else {
-            $payload['dockerfile'] = $this->dockerfileContent($profile);
+            $dockerfile = $this->dockerfileContent($profile);
+            $decoded = \base64_decode($dockerfile, true);
+            $payload['dockerfile'] = $decoded !== false && \base64_encode($decoded) === $dockerfile
+                ? $dockerfile
+                : \base64_encode($dockerfile);
         }
         if ($sourceType === 'git' && $buildPack === 'static') {
             $publishDirectory = $this->profileOption($profile, 'publish_directory');
@@ -4757,9 +4761,17 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             $this->assertApplicationOwnership($app, $tag);
             $existingTags = $app['tags'] ?? [];
             unset($payload['tags']);
-            $existingSource = \is_string($app['docker_registry_image_name'] ?? null) && $app['docker_registry_image_name'] !== ''
-                ? 'docker_image'
-                : ((\is_string($app['dockerfile'] ?? null) && $app['dockerfile'] !== '' && empty($app['git_repository'])) ? 'dockerfile' : 'git');
+            $existingRepository = $app['git_repository'] ?? '';
+            $existingBuildPack = $app['build_pack'] ?? '';
+            $hasInlineDockerfile = \is_string($app['dockerfile'] ?? null) && $app['dockerfile'] !== '';
+            $isStandaloneDockerfile = $hasInlineDockerfile && (empty($existingRepository)
+                || ($existingRepository === 'coollabsio/coolify' && $existingBuildPack === 'dockerfile'));
+            $hasRegistryImage = \is_string($app['docker_registry_image_name'] ?? null) && $app['docker_registry_image_name'] !== '';
+            $existingSource = match (true) {
+                $isStandaloneDockerfile => 'dockerfile',
+                $existingBuildPack === 'dockerimage', $existingBuildPack === '' && $hasRegistryImage => 'docker_image',
+                default => 'git',
+            };
             if ($existingSource !== $sourceType) {
                 throw new \RuntimeException('Coolify application source type changed; refusing an in-place Git/Dockerfile/Docker Image conversion.');
             }
