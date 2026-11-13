@@ -1055,6 +1055,77 @@ final class CoolifyProviderTest extends TestCase
         self::assertArrayNotHasKey('preview_url_template', $requestBody);
     }
 
+    public function testStandaloneDockerfileWorkerUsesNativeEntrypoint(): void
+    {
+        $dockerfile = "FROM php:8.3-cli-alpine\nCMD [\"php\", \"-S\", \"0.0.0.0:80\"]\n";
+        $profile = new class($dockerfile) {
+            public function __construct(private string $dockerfile) {}
+            public function name(): string { return 'production'; }
+            public function config(): array
+            {
+                return ['coolify' => ['source_type' => 'dockerfile', 'dockerfile' => $this->dockerfile]];
+            }
+        };
+        $project = new class {
+            public function name(): string { return 'storefront'; }
+        };
+        $requests = [];
+        $existingWorker = [];
+        $client = new CoolifyApiClient(
+            'https://coolify.example.test',
+            'api-token',
+            transport: static function (string $method, string $path, ?array $body) use (&$requests, &$existingWorker): array {
+                if ($method === 'POST' && $path === '/applications/dockerfile') {
+                    $requests[] = $body;
+
+                    return ['uuid' => count($requests) === 1 ? 'primary-1' : 'worker-1'];
+                }
+
+                if ($method === 'GET' && str_starts_with($path, '/applications?tag=')) {
+                    return $existingWorker === [] ? [] : [$existingWorker];
+                }
+                if ($method === 'PATCH' && $path === '/applications/worker-1') {
+                    $requests[] = $body;
+
+                    return [];
+                }
+
+                return [];
+            },
+        );
+        $provider = new CoolifyProvider(['api_token' => 'api-token'], $client);
+        $ensureApplication = new \ReflectionMethod($provider, 'ensureApplication');
+        $placement = [$client, $project, $profile, 'project-1', 'environment-1', 'production', 'server-1'];
+        $ensureApplication->invoke($provider, ...[...$placement, 'storefront-production', null]);
+        $command = "php artisan queue:work 'database' --queue='default'";
+        $ensureApplication->invoke($provider, ...[...$placement, 'storefront-production-queue-default-1', $command]);
+
+        self::assertSame($dockerfile, base64_decode($requests[0]['dockerfile']));
+        self::assertSame(
+            $dockerfile.'ENTRYPOINT '.json_encode(['/bin/sh', '-c', $command], JSON_UNESCAPED_SLASHES)."\n",
+            base64_decode($requests[1]['dockerfile']),
+        );
+        self::assertArrayNotHasKey('start_command', $requests[1]);
+        self::assertArrayNotHasKey('custom_docker_run_options', $requests[1]);
+
+        $existingWorker = [
+            'uuid' => 'worker-1',
+            'name' => 'storefront-production-queue-default-1',
+            'dockerfile' => $requests[1]['dockerfile'],
+            'tags' => $requests[1]['tags'],
+            'custom_docker_run_options' => '--entrypoint "legacy command"',
+        ];
+        $updatedCommand = $command.' --tries=3';
+        $worker = $ensureApplication->invoke($provider, ...[...$placement, $existingWorker['name'], $updatedCommand]);
+
+        self::assertSame('worker-1', $worker['uuid']);
+        self::assertSame('', $requests[2]['custom_docker_run_options']);
+        self::assertSame(
+            $dockerfile.'ENTRYPOINT '.json_encode(['/bin/sh', '-c', $updatedCommand], JSON_UNESCAPED_SLASHES)."\n",
+            base64_decode($requests[2]['dockerfile']),
+        );
+    }
+
     public function testComposeServiceComponentOverridesPatchDocumentedFields(): void
     {
         $requests = [];

@@ -4754,7 +4754,12 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             \is_array($payload['tags'] ?? null) ? $payload['tags'] : [],
             $tag,
         );
-        if (\in_array($sourceType, ['docker_image', 'dockerfile'], true) && \is_string($payload['start_command'] ?? null)) {
+        if ($sourceType === 'dockerfile' && $startCommand !== null) {
+            $entrypoint = \json_encode(['/bin/sh', '-c', $startCommand], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            $dockerfile = \rtrim(\base64_decode($payload['dockerfile']));
+            $payload['dockerfile'] = \base64_encode($dockerfile."\nENTRYPOINT ".$entrypoint."\n");
+            unset($payload['start_command']);
+        } elseif ($sourceType === 'docker_image' && \is_string($payload['start_command'] ?? null)) {
             $payload['custom_docker_run_options'] = $this->dockerImageEntrypointOptions(
                 (string) ($payload['custom_docker_run_options'] ?? ''),
                 $payload['start_command'],
@@ -4836,6 +4841,10 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 'is_http_basic_auth_enabled', 'http_basic_auth_username', 'http_basic_auth_password',
             ] as $createOnlyOption) {
                 unset($payload[$createOnlyOption]);
+            }
+            if ($sourceType === 'dockerfile' && $startCommand !== null && ! isset($payload['custom_docker_run_options'])) {
+                // Clear the generated runtime entrypoint used by older providers.
+                $payload['custom_docker_run_options'] = '';
             }
             $app = $this->checkedResourceUpdate($app, $client->request('PATCH', '/applications/'.\rawurlencode($uuid), $payload), $uuid, $tag, 'application');
             $existingTagNames = \is_array($existingTags) ? $this->tagNames($existingTags) : [];
@@ -6478,7 +6487,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                         'max_restart_count', 'is_container_label_escape_enabled',
                     ]),
                 );
-                if (\in_array($this->sourceType($profile), ['docker_image', 'dockerfile'], true)) {
+                if ($this->sourceType($profile) === 'docker_image') {
                     $workerSettings['custom_docker_run_options'] = $this->dockerImageEntrypointOptions(
                         \is_string($workerSettings['custom_docker_run_options'] ?? null)
                             ? $workerSettings['custom_docker_run_options']
