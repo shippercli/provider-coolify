@@ -79,8 +79,9 @@ final class ServiceOwnershipInventoryTest extends TestCase
             static function ($method, $path, $body) use (&$calls, $scope): array {
                 $calls[] = [$method, $path];
                 if ($path === '/services?tag='.rawurlencode($scope)) return [['uuid' => 'one', 'name' => 'stack',
-                    'service_type' => 'actualbudget', 'server_uuid' => 'server', 'environment_uuid' => 'environment']];
+                    'service_type' => 'actualbudget', 'server_uuid' => 'server', 'environment_id' => 7]];
                 if ($path === '/services/one/tags') return [['name' => 'shippercli-managed'], ['name' => $scope]];
+                if ($path === '/projects/project/environments') return [['uuid' => 'environment', 'id' => 7]];
                 return $method === 'PATCH' ? ['uuid' => 'one'] : [];
             });
         $result = (new \ReflectionMethod(new CoolifyProvider, 'applyCustomService'))->invoke(new CoolifyProvider,
@@ -88,6 +89,7 @@ final class ServiceOwnershipInventoryTest extends TestCase
         self::assertSame('one', $result);
         self::assertContains(['GET', '/services/one/tags'], $calls);
         self::assertContains(['PATCH', '/services/one'], $calls);
+        self::assertNotContains(['POST', '/services/one/move'], $calls);
     }
 
     public function testAmbiguousServicePlanIsReadOnlyAndBlocked(): void

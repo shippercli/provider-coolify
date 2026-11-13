@@ -5334,7 +5334,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
             \is_string($serviceSettings['destination_uuid'] ?? null) ? $serviceSettings['destination_uuid'] : '',
             ($serviceSettings['migrate_volumes'] ?? true) === true,
         );
-        if ($environmentUuid !== '' && ($service['environment_uuid'] ?? null) !== $environmentUuid) {
+        if ($environmentUuid !== '' && ! $this->resourceInEnvironment($client, $service, $projectUuid, $environmentUuid)) {
             $client->request('POST', '/services/'.\rawurlencode($uuid).'/move', [
                 'environment_uuid' => $environmentUuid,
             ]);
