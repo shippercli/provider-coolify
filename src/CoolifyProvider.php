@@ -951,7 +951,12 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
                 if ($forceDeploy === true) {
                     $this->deployResource($client, $serviceUuid, '', '', true);
                 } else {
-                    $client->request('POST', '/services/'.\rawurlencode($serviceUuid).'/start');
+                    $servicePath = '/services/'.\rawurlencode($serviceUuid);
+                    $service = $client->request('GET', $servicePath);
+                    $this->assertResponseIdentity($service, $serviceUuid, 'service');
+                    $status = $service['status'] ?? '';
+                    $action = \is_string($status) && \str_contains($status, 'running') ? 'restart' : 'start';
+                    $client->request('POST', $servicePath.'/'.$action);
                 }
             }
             foreach ($this->ownedApplications($client, $project, $profile, $this->workerResourceTag($project, $profile)) as $worker) {
