@@ -5283,7 +5283,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         }
         $isNewService = $service === null;
         if ($isNewService) {
-            $creationInventory = $this->validateServiceInventory($this->list($client->requestInventory('/services')), $tag);
+            $creationInventory = $this->serviceInventoryWithTags($client, '/services', $tag);
             foreach ($creationInventory as $candidate) {
                 if ($this->hasTag($candidate, $tag) && $this->hasTag($candidate, self::MARKER)) {
                     throw new \RuntimeException('Coolify service inventory disagrees with the scoped lookup; refusing duplicate creation.');
@@ -6585,6 +6585,25 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
         return $this->validateApplicationInventory($validated, $scope);
     }
 
+    /** @return array<int, array<string, mixed>> */
+    private function serviceInventoryWithTags(CoolifyApiClient $client, string $path, string $scope): array
+    {
+        $inventory = $this->list($client->requestInventory($path));
+        $validated = $this->validateServiceInventory($inventory, $scope);
+        foreach ($inventory as $index => $service) {
+            if (! isset($service['tags'])) {
+                $tagsPath = '/services/'.\rawurlencode($validated[$index]['uuid']).'/tags';
+                try {
+                    $validated[$index]['tags'] = $this->list($client->requestInventory($tagsPath));
+                } catch (\RuntimeException $error) {
+                    throw new \RuntimeException('Unable to verify Coolify service inventory tags.', 0, $error);
+                }
+            }
+        }
+
+        return $this->validateServiceInventory($validated, $scope);
+    }
+
     /** @param array<int, array<string, mixed>> $inventory
      *  @return array<int, array<string, mixed>>
      */
@@ -6839,7 +6858,7 @@ final class CoolifyProvider implements DeploymentProviderInterface, DeploymentLo
     private function ownedServices(CoolifyApiClient $client, string $tag): array
     {
         return \array_values(\array_filter(
-            $this->validateServiceInventory($this->list($client->requestInventory('/services?tag='.\rawurlencode($tag))), $tag),
+            $this->serviceInventoryWithTags($client, '/services?tag='.\rawurlencode($tag), $tag),
             fn (array $service): bool => $this->hasTag($service, $tag) && $this->hasTag($service, self::MARKER),
         ));
     }
