@@ -66,6 +66,32 @@ final class ServiceOwnershipInventoryTest extends TestCase
         self::assertContains(['PATCH', '/services/one'], $calls);
     }
 
+    public function testOwnedServiceWithOmittedTagsRemainsUpdatable(): void
+    {
+        $project = new class { public function name(): string { return 'storefront'; } };
+        $profile = new class {
+            public function name(): string { return 'production'; }
+            public function config(): array { return ['coolify' => ['service' => ['type' => 'actualbudget']]]; }
+        };
+        $scope = 'shippercli-'.substr(hash('sha256', json_encode(['storefront', 'production'], JSON_THROW_ON_ERROR)), 0, 16);
+        $calls = [];
+        $client = new CoolifyApiClient('https://example.test', 'synthetic', transport:
+            static function ($method, $path, $body) use (&$calls, $scope): array {
+                $calls[] = [$method, $path];
+                if ($path === '/services?tag='.rawurlencode($scope)) return [['uuid' => 'one', 'name' => 'stack',
+                    'service_type' => 'actualbudget', 'server_uuid' => 'server', 'environment_id' => 7]];
+                if ($path === '/services/one/tags') return [['name' => 'shippercli-managed'], ['name' => $scope]];
+                if ($path === '/projects/project/environments') return [['uuid' => 'environment', 'id' => 7]];
+                return $method === 'PATCH' ? ['uuid' => 'one'] : [];
+            });
+        $result = (new \ReflectionMethod(new CoolifyProvider, 'applyCustomService'))->invoke(new CoolifyProvider,
+            $client, $project, $profile, 'project', 'environment', 'production', 'server');
+        self::assertSame('one', $result);
+        self::assertContains(['GET', '/services/one/tags'], $calls);
+        self::assertContains(['PATCH', '/services/one'], $calls);
+        self::assertNotContains(['POST', '/services/one/move'], $calls);
+    }
+
     public function testAmbiguousServicePlanIsReadOnlyAndBlocked(): void
     {
         $project = new class { public function name(): string { return 'storefront'; } };
