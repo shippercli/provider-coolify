@@ -51,9 +51,10 @@ jobs:
           test -s .parity/per-test/index.json
           report_status=0
           parity check --format=github --suite-coverage=.parity/coverage.xml > .parity/comment.md || report_status=$?
+          # Exit 1 reports coverage findings. A valid report is required in either case.
+          test "$report_status" -le 1
           test "$(head -n 1 .parity/comment.md)" = '## TestParity coverage'
           echo "ready=true" >> "$GITHUB_OUTPUT"
-          exit "$report_status"
 
       - name: Upload coverage evidence
         id: report
