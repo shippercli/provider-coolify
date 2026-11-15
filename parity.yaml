@@ -1,0 +1,18 @@
+settings:
+  namespace_roots:
+    src: ShipperCli\ProviderCoolify
+    tests: ShipperCli\ProviderCoolify\Tests
+
+coverage_xml: .parity/per-test
+
+test:
+  command: "XDEBUG_MODE=coverage vendor/bin/phpunit {test_abs} --coverage-filter=src --coverage-clover={coverage} --colors=never --fail-on-warning"
+  coverage: ".parity/tmp/{slug}.xml"
+  reports: ".parity/per-test"
+
+structure:
+  - name: Coolify provider
+    paths:
+      source: src
+      test: tests
+    rules: []
