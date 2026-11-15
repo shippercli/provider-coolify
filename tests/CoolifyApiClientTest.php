@@ -67,6 +67,44 @@ final class CoolifyApiClientTest extends TestCase
         self::assertSame(['GET', '/databases', null], $request);
     }
 
+    public function testInventoryNormalizesTheRequestedListKey(): void
+    {
+        $rows = [['uuid' => 'database-1']];
+        $client = new CoolifyApiClient(
+            'https://example.test',
+            'synthetic',
+            transport: static fn (): array => ['databases' => $rows, 'count' => 1],
+        );
+
+        self::assertSame(
+            ['count' => 1, 'data' => $rows],
+            $client->requestInventory('/databases', 'databases'),
+        );
+    }
+
+    public function testInventoryRejectsARequestedListKeyAlongsideAGenericEnvelope(): void
+    {
+        $client = new CoolifyApiClient(
+            'https://example.test',
+            'synthetic',
+            transport: static fn (): array => ['databases' => [], 'data' => []],
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Coolify inventory response has an invalid JSON list envelope.');
+        $client->requestInventory('/databases', 'databases');
+    }
+
+    public function testDebugInfoRedactsConnectionDetails(): void
+    {
+        $client = new CoolifyApiClient('https://private.example.test', 'synthetic-token', timeout: 12, verifySsl: false);
+
+        self::assertSame(
+            ['baseUrl' => '[redacted]', 'token' => '[redacted]', 'timeout' => 12, 'verifySsl' => false],
+            $client->__debugInfo(),
+        );
+    }
+
     public function testTransportDiagnosticDoesNotExposeUrlCredentials(): void
     {
         $client = new CoolifyApiClient('http://synthetic-user:synthetic-url-password@127.0.0.1:bad-port', 'synthetic-token');
