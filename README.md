@@ -751,3 +751,5 @@ successful production deployment history. Coolify may list cached tags from
 other applications that use the same image repository. If the history omits
 the previous image tag, select a retained release explicitly with
 `shipper rollback myapp --profile=production --release=previous-tag`.
+
+[![advertisement](https://ads.servead.net/i/c2777f85-cfc1-43d4-a72b-84ecc3881951.svg)](https://ads.servead.net/c/c2777f85-cfc1-43d4-a72b-84ecc3881951)
